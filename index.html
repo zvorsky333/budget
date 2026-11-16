@@ -684,14 +684,15 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
       ${x.cushion ? `<div><span>${x.avail >= x.cushion ? `Of that, above your ${money(x.cushion)} cushion` : `Short of your ${money(x.cushion)} cushion by`}</span><span class="${x.avail < x.cushion ? "bad" : ""}">${money(Math.abs(Math.round((x.avail - x.cushion) * 100) / 100))}</span></div>` : ""}
     </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>
-      <details class="exact"><summary>${x.nmName}: about ${signed(Math.round(x.nextStart))} to spend</summary><div class="kv num">
+      <details class="exact"><summary>${x.nmName}: about ${signed(Math.round(x.nextStart))} from that month's pay</summary><div class="kv num">
         ${line(`Pay coming in ${x.nmName}`, x.incomeNext, "")}
         ${line("Bills and loan payments", x.nextFixed, "−")}
         ${line("Savings", x.nextSave, "−")}
         ${line(`${esc(state.card.name || "Credit card")} charges from this month`, x.nextCard, "−")}
-        <div class="tot"><span>Left for everyday spending</span><span class="${x.nextStart < 0 ? "bad" : ""}">${signed(Math.round(x.nextStart))}</span></div>
+        <div class="tot"><span>Left from ${x.nmName}'s pay</span><span class="${x.nextStart < 0 ? "bad" : ""}">${signed(Math.round(x.nextStart))}</span></div>
+        ${x.avail > 0 ? `<div><span>Plus whatever you don't spend of this month's ${money(Math.round(x.avail))}</span><span>up to +${money(Math.round(x.avail))}</span></div>` : ""}
       </div><div class="note">${x.stmtOnly ? "This month's card charges come out of next month because you're only paying what's due this month."
-        : "This month's card charges are already covered from this month's money, so they don't reduce next month."} Anything you don't spend this month is extra on top.</div></details>
+        : "This month's card charges are already covered from this month's money, so they don't reduce next month."} The two months share one pot: money spent now isn't there to carry over.</div></details>
       ${syncLine()}`;
   }
   let exactOpen = true;
