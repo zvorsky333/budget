@@ -231,6 +231,7 @@ body.sync-open { overflow: hidden; }
 .sy-foot .btn { flex: 1; min-height: 46px; font-size: 15px; }
 .syncline { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .syncline .btn { margin-left: auto; flex: none; }
+.ask { background: var(--accent-soft); border-radius: 10px; padding: 10px; display: grid; gap: 8px; font-size: 13px; }
 details.exact { background: var(--bg); border-radius: 10px; padding: 8px 10px; }
 details.exact summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
 details.exact .kv { margin-top: 8px; font-size: 13px; }
@@ -626,7 +627,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       value = t.pool - t.spentMonth; used = t.spentMonth; cap = t.pool;
       sub = `Spent ${money(t.spentMonth)} of ${moneyR(t.pool)} on everyday spending`;
     }
-    $("exactBox").innerHTML = exactHTML(t); $("exactBox").style.cssText = "display:grid;gap:8px";
+    $("exactBox").innerHTML = askHTML(t) + exactHTML(t); $("exactBox").style.cssText = "display:grid;gap:8px";
     $("heroLabel").textContent = label;
     $("heroNum").textContent = signed(value);
     $("heroNum").classList.toggle("neg", value < 0);
@@ -691,6 +692,14 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (r.bankGap <= -1) bits.push(`your bank had ${money(-r.bankGap)} more than expected (extra pay or a refund)`);
     const fixed = r.bankGap >= 1 || r.cardGap >= 1;
     return `<div class="note">Last re-sync: ${bits.length ? bits.join("; ") + "." : "everything matched what was logged."}${fixed ? " The missing amount was added to this month as Untracked spending." : ""}</div>`;
+  }
+  // Variable bills that have been paid this month but still show last month's figure.
+  function askHTML(t) {
+    return state.expenses.filter(e => e.varies && e.actualMonth !== t.monthS && isPaid(e, t)).map(e => {
+      const b = billStatus(e, t);
+      return `<div class="ask"><span><b>${esc(e.name || "A bill")}</b> ${b && b.code === "auto" ? `was auto-paid on the ${ordinal(b.d)}` : "is marked paid"}. What did it cost?</span>
+        <div class="btnrow"><button type="button" class="btn primary" data-askamt="${e.id}">Enter amount</button><button type="button" class="btn" data-asksame="${e.id}">Same as last time (${money(n(e.amount))})</button></div></div>`;
+    }).join("");
   }
   function exactHTML(t) {
     const x = t.exact;
@@ -787,7 +796,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const b = billStatus(it, t), done = isPaid(it, t);
       const tag = b && b.code === "auto" ? `Auto-paid ${ordinal(b.d)}` : done ? "Paid" : b && b.code === "late" ? `<span class="bad">Was due ${ordinal(b.d)}</span>` : (it.due ? `Due ${ordinal(it.due)}` : "") + (it.auto ? (it.due ? " · " : "") + "auto" : "");
       const amt = it.paid === t.monthS && it.paidAmt !== undefined && it.paidAmt !== "" ? n(it.paidAmt) : (!it.freq || it.freq === "monthly") ? n(it.amount) : monthly(it);
-      return `${name}<span class="sub rh-t">${tag}</span><span class="rh-v num">${it.varies && !done ? "about " : ""}${money(amt)}${it.freq && it.freq !== "monthly" ? "/mo" : ""}</span>`;
+      return `${name}<span class="sub rh-t">${tag}</span><span class="rh-v num">${it.varies && it.actualMonth !== t.monthS ? "about " : ""}${money(amt)}${it.freq && it.freq !== "monthly" ? "/mo" : ""}</span>`;
     }
     if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
     return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
@@ -1130,7 +1139,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
       if (c.checked) { if (it.paid !== month) { it.paidAmt = list === "debts" ? n(it.payment) : n(it.amount); } it.paid = month; it.paidAt = now - 1; it.unpaid = ""; it.hold = ""; }
       else { const d = parseInt(it.due, 10) || 0; it.hold = it.auto && d && d <= new Date().getDate() ? month : ""; it.paid = ""; it.paidAt = ""; it.unpaid = month; }
     });
-    document.querySelectorAll("#sync [data-sy-amt]").forEach(i => { const e = state.expenses.find(x => x.id === i.dataset.syAmt); if (e && i.value.trim() !== "") e.amount = i.value.trim(); });
+    document.querySelectorAll("#sync [data-sy-amt]").forEach(i => { const e = state.expenses.find(x => x.id === i.dataset.syAmt); if (!e || i.value.trim() === "") return;
+      const c = document.getElementById("sy-expenses-" + e.id);
+      if (i.value.trim() !== String(e.amount) || (c && c.checked)) e.actualMonth = month; // a ticked variable bill's amount is this month's real cost
+      e.amount = i.value.trim(); if (e.paid === month) e.paidAmt = n(e.amount); });
     closeSync(); changed(); renderTabs(); renderPanel(); renderSummary();
   }
 
@@ -1240,6 +1252,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (e.target.closest("[data-sync]")) { openSync(); return; }
     if (e.target.id === "syCancel") { closeSync(); return; }
     if (e.target.id === "sySave") { saveSync(); return; }
+    const ask = e.target.closest("[data-askamt]");
+    if (ask) { const id = ask.dataset.askamt; tab = "bills"; openRows.add(id); renderTabs(); renderPanel(); kpOpen(document.getElementById("expenses-amount-" + id)); return; }
+    const same = e.target.closest("[data-asksame]");
+    if (same) { const it = state.expenses.find(v => v.id === same.dataset.asksame); if (it) { it.actualMonth = ymd(new Date()).slice(0, 7); changed(); renderPanel(); renderSummary(); } return; }
     const tog = e.target.closest("[data-toggle]");
     if (tog) { const id = tog.dataset.toggle; if (openRows.has(id)) openRows.delete(id); else openRows.add(id); renderPanel(); return; }
     const opt = e.target.closest("[data-q]");
@@ -1308,6 +1324,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const it = state[r.dataset.list].find(x => x.id === r.dataset.id);
       if (it && r.dataset.list === "debts" && (target.dataset.k === "balance" || target.dataset.k === "due")) delete it.nextApply;
       if (it && target.dataset.k === "amount" && it.paid === ymd(new Date()).slice(0, 7)) it.paidAmt = n(value);
+      if (it && target.dataset.k === "amount" && r.dataset.list === "expenses" && it.varies) it.actualMonth = ymd(new Date()).slice(0, 7);
       if (it) { it[target.dataset.k] = target.dataset.k === "paid" ? (value ? ymd(new Date()).slice(0, 7) : "") : value; return true; }
     }
     if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value;
