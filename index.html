@@ -209,6 +209,12 @@ input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
 .btn { min-height: 38px; padding: 7px 12px; font-size: 13px; }
 textarea { width: 100%; min-height: 90px; font: 12px ui-monospace, Menlo, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+details.exact { background: var(--bg); border-radius: 10px; padding: 8px 10px; }
+details.exact summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
+details.exact .kv { margin-top: 8px; font-size: 13px; }
+details.exact .kv div span:first-child { min-width: 0; }
+details.exact .kv div span:last-child { white-space: nowrap; }
+details.exact .note { margin-top: 6px; }
 .btn.del { color: var(--bad); border-color: var(--bad); background: transparent; min-height: 34px; padding: 4px 12px; }
 .opt { min-height: 34px; padding: 5px 11px; font-size: 13px; }
 .quick { padding: 10px; gap: 8px; scroll-margin-top: 10px; }
@@ -244,12 +250,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="sub num" id="heroSub"></div>
     </div>
     <div class="meter" id="heroMeter"><span></span></div>
+    <div id="exactBox"></div>
 
     <div class="planhead"><h2 id="planTitle">Your plan</h2><span class="sub num" id="planIncome"></span></div>
     <div class="bar" id="bar" aria-hidden="true"></div>
     <div class="legend num" id="legend"></div>
     <div class="autoline num" id="autoLine"></div>
-    <div class="autoline num" id="balLine" hidden></div>
 
     <div class="save-row">
       <div class="top">
@@ -313,6 +319,24 @@ body.kp-open .wrap { padding-bottom: 360px; }
     while (bal > 0.005 && months < 1200) { const i = bal * r; interest += i; bal = bal + i - pay; months++; }
     return { months, interest };
   }
+  const nextFriday = () => { const d = new Date(); d.setDate(d.getDate() + ((5 - d.getDay() + 7) % 7 || 7)); return ymd(d); };
+  const shortDate = s => parseYmd(s).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // Paydays after sY, up to and including endY. null when no next payday is set.
+  function paydaysBetween(i, sY, endY) {
+    if (!i.next) return null;
+    const step = { weekly: 7, biweekly: 14 }[i.freq];
+    const add = (d, k) => { const x = new Date(d); if (step) x.setDate(x.getDate() + k * step); else if (i.freq === "yearly") x.setFullYear(x.getFullYear() + k); else x.setMonth(x.getMonth() + k); return x; };
+    let d = parseYmd(i.next), g = 0; const out = [];
+    while (ymd(d) > sY && g++ < 800) d = add(d, -1);
+    for (g = 0; g < 800; g++) { d = add(d, 1); const y = ymd(d); if (y > endY) break; if (y > sY) out.push(y); }
+    return out;
+  }
+  // How much of a bill is still to come this month, counting from day snapDay.
+  function dueLeft(e, snapDay, monthS, dim) {
+    if (e.paid === monthS) return 0;
+    if (!e.freq || e.freq === "monthly") { const d = Math.min(parseInt(e.due, 10) || 0, dim); return (!d || d >= snapDay) ? n(e.amount) : 0; }
+    return monthly(e) * (dim - snapDay + 1) / dim;
+  }
   const loanPayment = (P, aprPct, months) => {
     if (P <= 0 || months <= 0) return 0;
     const r = aprPct / 100 / 12;
@@ -326,8 +350,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
 
   // ================= state =================
   const EXAMPLE = () => ({
-    v: 2, isExample: true, savingsPct: 10, savingsAuto: true, balance: "", balanceSpend: true,
-    income: [{ id: uid(), name: "Paycheck (take-home)", amount: 900, freq: "weekly" }],
+    v: 2, isExample: true, savingsPct: 10, savingsAuto: true, balance: 850, balanceAt: Date.now(), cushion: "",
+    income: [{ id: uid(), name: "Paycheck (take-home)", amount: 900, freq: "weekly", next: nextFriday() }],
     expenses: [
       { id: uid(), name: "Rent", amount: 1400, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 1 },
       { id: uid(), name: "Electric", amount: 90, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 15 },
@@ -345,8 +369,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
       { id: "shop", name: "Shopping", amount: 100, kind: "want" },
       { id: "fun", name: "Fun & hobbies", amount: 80, kind: "want" },
     ],
-    debts: [{ id: uid(), name: "Car loan", balance: 9800, apr: 6.9, payment: 310, auto: true }],
-    card: { name: "Credit card", limit: 3000, dueDay: 25, carried: 0 },
+    debts: [{ id: uid(), name: "Car loan", balance: 9800, apr: 6.9, payment: 310, auto: true, due: 28 }],
+    card: { name: "Credit card", limit: 3000, dueDay: 25, balance: 120, balanceAt: Date.now() },
     log: [
       { id: uid(), date: daysAgo(0), amount: 6.5, note: "Coffee", cat: "dine", method: "card" },
       { id: uid(), date: daysAgo(1), amount: 45, note: "Gas", cat: "gas", method: "bank" },
@@ -356,21 +380,30 @@ body.kp-open .wrap { padding-bottom: 360px; }
     calc: { amount: 15000, apr: 7.5, months: 60 },
   });
 
-  function migrate(s) {
+  function migrate(raw) {
+    const s = migrate0(raw);
+    if (!s) return null;
+    if (s.balance === undefined || s.balance === null) s.balance = "";
+    if (s.balance !== "" && !s.balanceAt) s.balanceAt = Date.now();
+    if (s.cushion === undefined) s.cushion = "";
+    delete s.balanceSpend;
+    s.card = Object.assign({ name: "Credit card", limit: "", dueDay: "", balance: "" }, s.card || {});
+    if (s.card.carried !== undefined) { if (s.card.balance === "" && n(s.card.carried) > 0) s.card.balance = s.card.carried; delete s.card.carried; }
+    return s;
+  }
+  function migrate0(s) {
     if (!s || typeof s !== "object") return null;
     if (s.v === 2 && Array.isArray(s.expenses)) {
       const base = EXAMPLE();
       for (const k of ["income", "expenses", "budgets", "debts", "log"]) if (!Array.isArray(s[k])) s[k] = [];
-      s.card = Object.assign({ name: "Credit card", limit: "", dueDay: "", carried: 0 }, s.card || {});
+
       s.calc = Object.assign(base.calc, s.calc || {});
-      if (s.balance === undefined) s.balance = "";
-      if (s.balanceSpend === undefined) s.balanceSpend = true;
       return s;
     }
     if (Array.isArray(s.bills)) { // from the first version of this app
       const needish = /grocer|gas|transit|fuel|util|medic|pharm/i;
       return {
-        v: 2, isExample: !!s.isExample, savingsPct: n(s.savingsPct) || 10, savingsAuto: false, balance: "", balanceSpend: true,
+        v: 2, isExample: !!s.isExample, savingsPct: n(s.savingsPct) || 10, savingsAuto: false, balance: "",
         income: s.income || [],
         expenses: [
           ...(s.bills || []).map(b => ({ ...b, kind: "need", auto: false, pay: "bank" })),
@@ -378,7 +411,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
         ],
         budgets: (s.spending || []).map(b => ({ ...b, kind: needish.test(b.name) ? "need" : "want" })),
         debts: (s.debts || []).map(d => ({ ...d, auto: true })),
-        card: { name: "Credit card", limit: "", dueDay: "", carried: 0 },
+        card: { name: "Credit card", limit: "", dueDay: "", balance: "" },
         log: [],
         calc: { amount: 15000, apr: 7.5, months: 60 },
       };
@@ -423,28 +456,58 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const spentWeek = sum(state.log.filter(e => e.date >= weekStart && e.date <= weekEnd), e => n(e.amount));
 
     // Money for everyday spending = category limits + anything not assigned.
-    // A starting bank balance adds to it unless it's being kept as a cushion.
-    const start = n(state.balance);
-    const spendStart = state.balanceSpend !== false ? start : 0;
-    const pool = flex + Math.max(left + spendStart, 0);
-    const projectedEnd = start + income - needFixed - wantFixed - debt - savings - Math.max(flex, spentMonth);
+    const pool = flex + Math.max(left, 0);
     const dayAllowance = Math.max(pool - spentBeforeToday, 0) / daysLeft;
     const weekPool = pool * SCALE.week;
 
     // Credit card: everything charged this month must be payable from this month's money.
     const cardFixed = sum(exp.filter(e => e.pay === "card"), monthly);
     const cardSpent = sum(monthLog.filter(e => e.method === "card"), e => n(e.amount));
-    const carried = n(state.card.carried);
+    const carried = n(state.card.balance);
     const cardTotal = cardFixed + cardSpent + carried;
     const bankFixed = sum(exp.filter(e => e.pay !== "card"), monthly);
     const bankSpent = spentMonth - cardSpent;
-    const capacity = start + income - bankFixed - debt - savings - bankSpent;
+    const capacity = income - bankFixed - debt - savings - bankSpent;
     const remainingPool = Math.max(pool - spentMonth, 0);
     const cardRoom = capacity - cardTotal;
     const projected = cardTotal + remainingPool; // if the rest of your everyday budget goes on the card
 
-    return { today, todayS, monthS, dim, daysLeft, weekStart, weekEnd, income, needFixed, wantFixed, needFlex, wantFlex, flex, debt, savings, needs, wants, left, autoTotal,
-      start, projectedEnd, monthLog, spentMonth, spentToday, spentWeek, pool, dayAllowance, weekPool, cardFixed, cardSpent, carried, cardTotal, bankFixed, bankSpent, capacity, cardRoom, projected };
+    // ---- Exact mode: start from the real balances entered this month ----
+    let exact = null;
+    const bankAt = +state.balanceAt;
+    if (state.balance !== "" && bankAt && ymd(new Date(bankAt)).slice(0, 7) === monthS) {
+      const sD = new Date(bankAt), sDay = sD.getDate(), sY = ymd(sD), endY = monthS + "-" + pad(dim);
+      const cRaw = +state.card.balanceAt, cFresh = state.card.balance !== "" && cRaw && ymd(new Date(cRaw)).slice(0, 7) === monthS;
+      const cardAt = cFresh ? cRaw : bankAt, cDay = new Date(cardAt).getDate(), cY = ymd(new Date(cardAt));
+      const since = (e, at, y) => e.date > y || (e.date === y && e.at && e.at > at);
+      let incomeLeft = 0, guessed = false; const paydays = [];
+      for (const i of state.income) {
+        const ds = paydaysBetween(i, sY, endY);
+        if (ds) { incomeLeft += ds.length * n(i.amount); paydays.push(...ds); }
+        else if (n(i.amount) > 0) { incomeLeft += monthly(i) * (dim - sDay) / dim; guessed = true; }
+      }
+      paydays.sort();
+      const bankBills = sum(exp.filter(e => e.pay !== "card"), e => dueLeft(e, sDay, monthS, dim));
+      const cardBills = sum(exp.filter(e => e.pay === "card"), e => dueLeft(e, cDay, monthS, dim));
+      const debtLeft = sum(state.debts, d => dueLeft({ amount: d.payment, due: d.due, paid: d.paid }, sDay, monthS, dim));
+      const savingsLeft = incomeLeft * n(state.savingsPct) / 100;
+      const isCard = e => e.method === "card";
+      const bankSince = sum(monthLog.filter(e => !isCard(e) && since(e, bankAt, sY)), e => n(e.amount));
+      const cardSince = sum(monthLog.filter(e => isCard(e) && since(e, cardAt, cY)), e => n(e.amount));
+      const todaySince = sum(monthLog.filter(e => e.date === todayS && since(e, isCard(e) ? cardAt : bankAt, isCard(e) ? cY : sY)), e => n(e.amount));
+      const cardOwed = (cFresh ? n(state.card.balance) : 0) + cardSince + cardBills;
+      const cushion = n(state.cushion);
+      const beforeCard = n(state.balance) + incomeLeft - bankBills - debtLeft - savingsLeft - bankSince;
+      const avail = beforeCard - cardOwed - cushion;
+      const dayAllow = Math.max(avail + todaySince, 0) / daysLeft;
+      const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
+      exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
+        bankSince, cardSince, todaySince, cardOwed, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+    }
+    const stale = !exact && state.balance !== "" && !!bankAt;
+
+    return { exact, stale, today, todayS, monthS, dim, daysLeft, weekStart, weekEnd, income, needFixed, wantFixed, needFlex, wantFlex, flex, debt, savings, needs, wants, left, autoTotal,
+      monthLog, spentMonth, spentToday, spentWeek, pool, dayAllowance, weekPool, cardFixed, cardSpent, carried, cardTotal, bankFixed, bankSpent, capacity, cardRoom, projected };
   }
 
   // ================= summary =================
@@ -454,7 +517,24 @@ body.kp-open .wrap { padding-bottom: 360px; }
     document.querySelectorAll("#viewSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view));
 
     let label, value, sub, used, cap;
-    if (view === "day") {
+    const x = t.exact;
+    if (x) {
+      const end = shortDate(x.endY);
+      if (view === "day") {
+        label = "Safe to spend today";
+        value = x.dayAllow - x.todaySince; used = x.todaySince; cap = x.dayAllow;
+        sub = `Spent ${money(x.todaySince)} of ${money(x.dayAllow)} today · ${signed(Math.round(x.avail))} to last ${t.daysLeft} day${t.daysLeft === 1 ? "" : "s"}`;
+      } else if (view === "week") {
+        label = "Safe to spend through Sunday";
+        const wk = x.dayAllow * x.daysWeek;
+        value = wk - x.todaySince; used = x.todaySince; cap = wk;
+        sub = `${x.daysWeek} day${x.daysWeek === 1 ? "" : "s"} at ${money(x.dayAllow)} a day`;
+      } else {
+        label = "Left to spend until " + end;
+        value = x.avail; used = x.bankSince + x.cardSince; cap = Math.max(x.avail, 0) + used;
+        sub = `After the bills, card and savings still to come · spent ${money(used)} since your balance`;
+      }
+    } else if (view === "day") {
       label = "Safe to spend today";
       value = t.dayAllowance - t.spentToday; used = t.spentToday; cap = t.dayAllowance;
       sub = `Spent ${money(t.spentToday)} of ${money(t.dayAllowance)} today · ${t.daysLeft} day${t.daysLeft === 1 ? "" : "s"} left this month`;
@@ -469,10 +549,11 @@ body.kp-open .wrap { padding-bottom: 360px; }
       value = t.pool - t.spentMonth; used = t.spentMonth; cap = t.pool;
       sub = `Spent ${money(t.spentMonth)} of ${moneyR(t.pool)} on everyday spending`;
     }
+    $("exactBox").innerHTML = exactHTML(t);
     $("heroLabel").textContent = label;
     $("heroNum").textContent = signed(value);
     $("heroNum").classList.toggle("neg", value < 0);
-    $("heroSub").textContent = t.income > 0 ? sub : "Add your income to get started";
+    $("heroSub").textContent = (t.income > 0 || x) ? sub : "Add your income to get started";
     const pct = cap > 0 ? Math.min(used / cap, 1) * 100 : (used > 0 ? 100 : 0);
     $("heroMeter").querySelector("span").style.width = pct.toFixed(1) + "%";
     $("heroMeter").classList.toggle("over", used > cap);
@@ -497,8 +578,6 @@ body.kp-open .wrap { padding-bottom: 360px; }
     }).join("");
     $("autoLine").innerHTML = `<i></i><span>Goes out automatically</span><span class="v">${fmtS(t.autoTotal * s)} <span class="sub">${t.income > 0 ? Math.round(t.autoTotal / t.income * 100) + "% of pay" : ""}</span></span>`;
 
-    $("balLine").hidden = !t.start;
-    $("balLine").innerHTML = `<span>In the bank: started with <b>${money(t.start)}</b></span><span class="v${t.projectedEnd < 0 ? " bad" : ""}">${signed(Math.round(t.projectedEnd))} <span class="sub">at month end</span></span>`;
     $("savePct").value = state.savingsPct;
     $("saveAuto").checked = !!state.savingsAuto;
     $("savePctOut").textContent = state.savingsPct + "%";
@@ -510,12 +589,33 @@ body.kp-open .wrap { padding-bottom: 360px; }
       warn.textContent = `Your plan spends ${moneyR(-t.left)} a month more than you take home. Your wants add up to ${moneyR(t.wants)} a month; trimming those is the first place to look.`;
     } else warn.hidden = true;
 
-    const ok = t.cardTotal <= t.capacity;
-    $("cardLine").innerHTML = `<span>${esc(state.card.name || "Credit card")}: <b>${money(t.cardTotal)}</b> this month</span>
-      <span class="pill ${ok ? "ok" : "no"}">${ok ? "Can pay in full" : "Short " + moneyR(t.cardTotal - t.capacity)}</span>`;
+    const cOwed = x ? x.cardOwed : t.cardTotal, cShort = x ? -(x.avail + x.cushion) : t.cardTotal - t.capacity;
+    $("cardLine").innerHTML = `<span>${esc(state.card.name || "Credit card")}: <b>${money(cOwed)}</b> ${x ? "to pay off" : "this month"}</span>
+      <span class="pill ${cShort <= 0 ? "ok" : "no"}">${cShort <= 0 ? "Can pay in full" : "Short " + moneyR(cShort)}</span>`;
 
     $("exampleBanner").hidden = !state.isExample;
   }
+
+  function exactHTML(t) {
+    const x = t.exact;
+    if (!x) return `<div class="autoline"><span>${t.stale ? "Your bank balance is from last month. Enter today's balance" : "This is an estimate from your monthly plan. Enter what's in your bank right now"} for an exact number.</span><button type="button" class="btn" data-tab="income" style="margin-left:auto;flex:none">Enter</button></div>`;
+    const asOf = new Date(x.bankAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    const pd = x.paydays.length ? ` (${x.paydays.map(shortDate).join(", ")})` : "";
+    const line = (l, v, sign) => v || sign === "" ? `<div><span>${l}</span><span>${sign}${money(Math.abs(v))}</span></div>` : "";
+    return `<details class="exact"${exactOpen ? " open" : ""}><summary>How this is worked out</summary><div class="kv num">
+      ${line(`In the bank on ${asOf}`, x.bank, "")}
+      ${x.guessed ? line("Pay still to come (estimate, set your next payday)", x.incomeLeft, "+") : line(`${x.paydays.length} paycheck${x.paydays.length === 1 ? "" : "s"} still to come${pd}`, x.incomeLeft, "+")}
+      ${line("Bills still to come from the bank", x.bankBills, "−")}
+      ${line("Loan payments still to come", x.debtLeft, "−")}
+      ${line("Savings from the pay still to come", x.savingsLeft, "−")}
+      ${line("Spent from bank or cash since " + asOf, x.bankSince, "−")}
+      ${line(`${esc(state.card.name || "Credit card")} to pay off in full`, x.cardOwed, "−")}
+      ${line("Cushion to keep in the bank", x.cushion, "−")}
+      <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
+    </div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Add it on the Card tab.</div>`}</details>`;
+  }
+  let exactOpen = true;
+  document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
 
   // ================= tabs =================
   const TABS = [
@@ -538,20 +638,32 @@ body.kp-open .wrap { padding-bottom: 360px; }
   const KIND = [["need", "Need"], ["want", "Want / luxury"]];
   const removeBtn = (list, it) => `<button type="button" class="btn del" data-del="${it.id}" data-list="${list}" aria-label="Delete ${esc(it.name) || "item"}">Delete</button>`;
   const openRows = new Set();
+  // In exact mode, says whether a bill or loan payment is still counted against this month's money.
+  function stillPill(it, t, asDebt) {
+    const x = t.exact; if (!x) return "";
+    const e = asDebt ? { amount: it.payment, due: it.due, paid: it.paid } : it;
+    const left = dueLeft(e, !asDebt && it.pay === "card" ? x.cDay : x.sDay, t.monthS, t.dim);
+    return left > 0 ? '<span class="pill no">Still to come</span>' : '<span class="pill ok">Paid</span>';
+  }
+  const paidBox = (list, it, t) => `<label class="check"><input type="checkbox" data-k="paid" id="${list}-paid-${it.id}"${it.paid === t.monthS ? " checked" : ""}> Already paid this month</label>`;
   const catSpent = (it, t) => t.monthLog.filter(e => e.cat === it.id).reduce((a, e) => a + n(e.amount), 0);
   function head(list, it, t) {
     const name = `<span class="rh-n">${esc(it.name || "Unnamed")}</span>`;
     if (list === "income") return `${name}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
-    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
+    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${t.exact && dueLeft(it, it.pay === "card" ? t.exact.cDay : t.exact.sDay, t.monthS, t.dim) > 0 ? '<span class="pill no">Due</span>' : ""}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
     if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
     return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
   }
 
   // ---------- row meta (live-updated) ----------
   function meta(list, it, t) {
-    if (list === "income") return `<span></span><span><b>${money(monthly(it))}</b> a month · ${money(monthly(it) * 12 / 52)} a week</span>`;
+    if (list === "income") {
+      const ds = t.exact ? paydaysBetween(it, ymd(new Date(t.exact.bankAt)), t.exact.endY) : null;
+      const left = !it.next ? '<span class="bad">Set your next payday for exact numbers</span>' : ds ? `<span>${ds.length ? "Still to come: " + ds.map(shortDate).join(", ") : "No more paydays this month"}</span>` : "<span></span>";
+      return `${left}<span><b>${money(monthly(it))}</b> a month</span>`;
+    }
     if (list === "expenses") {
-      const tags = `<span style="display:flex;gap:6px;flex-wrap:wrap">${it.auto ? '<span class="pill auto">Automatic</span>' : ""}<span class="pill ${it.kind === "want" ? "want" : "need"}">${it.kind === "want" ? "Want" : "Need"}</span>${it.due ? `<span>Due ${ordinal(it.due)}</span>` : ""}</span>`;
+      const tags = `<span style="display:flex;gap:6px;flex-wrap:wrap">${it.auto ? '<span class="pill auto">Automatic</span>' : ""}<span class="pill ${it.kind === "want" ? "want" : "need"}">${it.kind === "want" ? "Want" : "Need"}</span>${it.due ? `<span>Due ${ordinal(it.due)}</span>` : ""}${stillPill(it, t)}</span>`;
       return `${tags}<span><b>${money(monthly(it))}</b>/mo</span>`;
     }
     if (list === "budgets") {
@@ -565,7 +677,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       if (n(it.balance) <= 0) return `<span>Paid off</span>`;
       if (p.never) return `<span class="bad">Payment must be over ${money(p.minNeeded)} just to cover interest</span>`;
       const d = new Date(); d.setMonth(d.getMonth() + p.months);
-      return `<span>Paid off in <b>${p.months} mo</b> (${monthName(d)})</span><span>Interest: <b>${moneyR(p.interest)}</b></span>`;
+      return `<span>Paid off in <b>${p.months} mo</b> (${monthName(d)})</span><span>Interest: <b>${moneyR(p.interest)}</b></span>${stillPill(it, t, true)}`;
     }
     return "";
   }
@@ -605,7 +717,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="list">${cats.length ? cats.map(c => row("budgets", c, `<div class="fields">${textField("budgets", c, "Category", "e.g. Groceries")}${moneyField("budgets", c, "amount", "Monthly limit")}</div>
         <div class="fields even">${selectField("budgets", c, "kind", "Type", KIND)}</div>`, t)).join("") : '<div class="empty">No categories yet.</div>'}</div>
       <div><button type="button" class="btn" data-add="budgets">Add category</button></div>
-      <div class="note">Tap a category to edit or delete it. Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.</div>
+      <div class="note">Tap a category to edit or delete it. ${t.exact ? "Your daily amount is what's left until the end of the month, spread over the days left." : `Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.`}</div>
 
       <div class="group-title"><h3>This month's purchases</h3><span class="sub num">${money(t.spentMonth)}</span></div>
       <div class="log">${recent.length ? recent.map(e => `<div class="log-item num">
@@ -625,7 +737,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="fields even">${selectField("expenses", e, "freq", "How often", freqOpts(["monthly", "weekly", "biweekly", "quarterly", "semi", "yearly"]))}
       <label class="field"><span>Due day</span><input type="number" inputmode="numeric" min="1" max="31" data-k="due" id="expenses-due-${e.id}" value="${esc(e.due)}" placeholder="1–31"></label></div>
       <div class="fields even">${selectField("expenses", e, "kind", "Type", KIND)}${selectField("expenses", e, "pay", "Paid from", [["bank", "Bank account"], ["card", state.card.name || "Credit card"]])}</div>
-      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>`, t);
+      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>${paidBox("expenses", e, t)}`, t);
     const auto = state.expenses.filter(e => e.auto), manual = state.expenses.filter(e => !e.auto);
     const sumM = a => moneyR(a.reduce((s, e) => s + monthly(e), 0));
     return `<div class="chips" id="chips">${chipsHTML(t)}</div>
@@ -639,17 +751,21 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
 
   function panelIncome(t) {
+    const asOf = state.balance !== "" && state.balanceAt ? new Date(+state.balanceAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
     return `<div class="quick">
-        <h3>Starting balance</h3>
-        <label class="field"><span>In your bank at the start of this month</span><div class="prefix dollar" data-p="$"><input type="number" data-path="balance" id="bankBalance" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
-        <label class="check"><input type="checkbox" data-path="balanceSpend" id="balanceSpend"${state.balanceSpend !== false ? " checked" : ""}> Count it as money I can spend this month</label>
-        <div class="note">Update this at the start of each month. Uncheck the box to keep it as a cushion: it still counts toward paying your card, but not toward your daily amount.</div>
+        <h3>Your money right now</h3>
+        <div class="fields even">
+          <label class="field"><span>In your bank right now</span><div class="prefix dollar" data-p="$"><input type="number" data-path="balance" id="bankBalance" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
+          <label class="field"><span>Cushion to keep</span><div class="prefix dollar" data-p="$"><input type="number" data-path="cushion" id="cushion" value="${esc(state.cushion)}" placeholder="0"></div></label>
+        </div>
+        <div class="note" id="balNote">${asOf ? `Entered ${asOf}. ` : ""}Enter your balance as it is today. From there the app adds only the paychecks still to come this month and takes off only the bills still to come. Re-enter it any time to re-sync.</div>
       </div>
       <div class="group-title"><h3>Income</h3><span class="sub num">${moneyR(t.income)}/mo</span></div>
       <div class="list">${state.income.map(i => row("income", i, `<div class="fields">${textField("income", i, "Source", "e.g. Paycheck")}${moneyField("income", i, "amount", "Amount")}</div>
-      <div class="fields even">${selectField("income", i, "freq", "How often", freqOpts(["weekly", "biweekly", "monthly", "yearly"]))}</div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
+      <div class="fields even">${selectField("income", i, "freq", "How often", freqOpts(["weekly", "biweekly", "monthly", "yearly"]))}
+      <label class="field"><span>Next payday</span><input type="date" data-k="next" id="income-next-${i.id}" value="${esc(i.next || "")}"></label></div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
       <div><button type="button" class="btn primary" data-add="income">Add income</button></div>
-      <div class="note">Use take-home pay, after taxes and anything your employer deducts. Weekly pay becomes a monthly figure as pay × 52 ÷ 12, since some months have five paydays.</div>
+      <div class="note">Use take-home pay, after taxes and anything your employer deducts. Set the next payday so the app knows how many paychecks are still to come this month.</div>
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Backup</h3></div>
       <div class="note">Your budget is stored only in this app on this device. Copy a backup now and then and keep it in Notes, so you can restore it if the data is ever cleared or you move to a new phone.</div>
       <div class="btnrow"><button type="button" class="btn" id="bkCopy">Copy backup</button><button type="button" class="btn" id="bkShow">Restore from a backup</button></div>
@@ -661,22 +777,33 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
 
   function cardHTML(t) {
+    const lim = n(state.card.limit), x = t.exact;
+    const due = state.card.dueDay ? ` by the ${ordinal(state.card.dueDay)}` : "";
+    const util = owed => lim > 0 ? `<div class="field"><span>Credit used: ${money(owed)} of ${moneyR(lim)} (${Math.round(owed / lim * 100)}%)</span><div class="meter${owed > lim * 0.3 ? " over" : ""}"><span style="width:${Math.min(owed / lim, 1) * 100}%"></span></div></div>` : "";
+    if (x) {
+      const short = -(x.avail + x.cushion), ok = short <= 0;
+      return `<div class="${ok ? "okbox" : "warn"}">${ok
+          ? `You can pay the ${money(x.cardOwed)} in full${due}. After that you'd still have <b>${moneyR(Math.max(x.avail, 0))}</b> to spend this month.`
+          : `You're ${moneyR(short)} short of paying the card in full this month. Cut spending or move a bill to get back under.`}</div>
+        <div class="kv num">
+          <div><span>Card balance${x.cFresh ? " on " + new Date(x.cardAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : " (not entered)"}</span><span>${money(x.cardNow)}</span></div>
+          <div><span>Card purchases logged since</span><span>${money(x.cardSince)}</span></div>
+          <div><span>Card bills still to be charged</span><span>${money(x.cardBills)}</span></div>
+          <div class="tot"><span>To pay off this month</span><span>${money(x.cardOwed)}</span></div>
+          <div><span>Bank money available for it</span><span>${signed(Math.round(x.beforeCard * 100) / 100)}</span></div>
+        </div>${util(x.cardOwed)}`;
+    }
     const ok = t.cardTotal <= t.capacity;
-    const projOk = t.projected <= t.capacity;
-    const lim = n(state.card.limit);
-    const due = state.card.dueDay ? ` before the ${ordinal(state.card.dueDay)}` : "";
     return `<div class="${ok ? "okbox" : "warn"}">${ok
-        ? `You can pay this month's ${money(t.cardTotal)} in full${due}. You have room for <b>${moneyR(t.cardRoom)}</b> more on the card this month.`
-        : `This month's card total is ${moneyR(t.cardTotal - t.capacity)} more than you'll have left to pay it. Move spending off the card or cut back to pay it in full.`}</div>
+        ? `Estimate from your monthly plan: you can pay this month's ${money(t.cardTotal)} in full${due}, with room for <b>${moneyR(t.cardRoom)}</b> more.`
+        : `Estimate from your monthly plan: this month's card total is ${moneyR(t.cardTotal - t.capacity)} more than you'll have left to pay it.`}</div>
       <div class="kv num">
         <div><span>Recurring bills on the card</span><span>${money(t.cardFixed)}</span></div>
         <div><span>Purchases this month</span><span>${money(t.cardSpent)}</span></div>
-        ${t.carried ? `<div><span>Unpaid from before this month</span><span>${money(t.carried)}</span></div>` : ""}
+        ${t.carried ? `<div><span>Card balance entered</span><span>${money(t.carried)}</span></div>` : ""}
         <div class="tot"><span>Card total this month</span><span>${money(t.cardTotal)}</span></div>
-        <div><span>Money left to pay it</span><span>${money(t.capacity)}</span></div>
-      </div>
-      ${lim > 0 ? `<div class="field"><span>Credit used: ${money(t.cardTotal)} of ${moneyR(lim)} (${Math.round(t.cardTotal / lim * 100)}%)</span><div class="meter${t.cardTotal > lim * 0.3 ? " over" : ""}"><span style="width:${Math.min(t.cardTotal / lim, 1) * 100}%"></span></div></div>` : ""}
-      <div class="note">If you put the rest of this month's everyday budget on the card, the bill would be about ${moneyR(t.projected)}: ${projOk ? "still payable in full." : `<span class="bad">${moneyR(t.projected - t.capacity)} more than you can pay.</span>`}${lim > 0 ? " Keeping use under 30% of the limit helps your credit score." : ""}</div>`;
+      </div>${util(t.cardTotal)}
+      <div class="note">Enter your bank balance on the Income tab to make this exact.</div>`;
   }
   function panelCard(t) {
     const c = state.card;
@@ -686,10 +813,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
       </div>
       <div class="fields even">
         <label class="field"><span>Payment due day</span><input type="number" inputmode="numeric" min="1" max="31" data-path="card.dueDay" id="cardDue" value="${esc(c.dueDay)}" placeholder="1–31"></label>
-        <label class="field"><span>Unpaid from last month</span><div class="prefix dollar" data-p="$"><input type="number" inputmode="decimal" min="0" step="0.01" data-path="card.carried" id="cardCarried" value="${esc(c.carried)}"></div></label>
+        <label class="field"><span>Card balance right now</span><div class="prefix dollar" data-p="$"><input type="number" data-path="card.balance" id="cardBalance" value="${esc(c.balance)}" placeholder="Tap to enter"></div></label>
       </div>
       <div id="cardOut" class="card" style="padding:0;border:0">${cardHTML(t)}</div>
-      <div class="note">Bills set to "Paid from: ${esc(c.name || "Credit card")}" and purchases logged with the card count here. Money left to pay it is your starting balance plus income, minus everything paid from your bank, debt payments and savings.</div>`;
+      <div class="note">Enter the balance your card shows today. Purchases you log with the card after that, and card bills still to be charged this month, are added on top. Re-enter it any time to re-sync.</div>`;
   }
 
   function calcHTML(t) {
@@ -720,7 +847,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="fields three">${moneyField("debts", d, "balance", "Balance")}
       <label class="field"><span>Interest (APR)</span><div class="prefix pct" data-p="%"><input type="number" inputmode="decimal" min="0" step="0.01" data-k="apr" id="debts-apr-${d.id}" value="${esc(d.apr)}"></div></label>
       ${moneyField("debts", d, "payment", "Monthly payment")}</div>
-      <label class="check"><input type="checkbox" data-k="auto" id="debts-auto-${d.id}"${d.auto ? " checked" : ""}> Comes out automatically</label>`, t)).join("") : '<div class="empty">No loans. Your credit card is tracked on its own tab since you pay it in full.</div>'}</div>
+      <div class="fields even"><label class="field"><span>Due day</span><input type="number" min="1" max="31" data-k="due" id="debts-due-${d.id}" value="${esc(d.due)}" placeholder="1–31"></label></div>
+      <label class="check"><input type="checkbox" data-k="auto" id="debts-auto-${d.id}"${d.auto ? " checked" : ""}> Comes out automatically</label>${paidBox("debts", d, t)}`, t)).join("") : '<div class="empty">No loans. Your credit card is tracked on its own tab since you pay it in full.</div>'}</div>
       <div><button type="button" class="btn" data-add="debts">Add a loan</button></div>
 
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:14px"><h3>Can I afford a new loan?</h3></div>
@@ -865,10 +993,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
     }
     if (e.target.id === "clearExamples") {
       const base = EXAMPLE();
-      state = { v: 2, isExample: false, savingsPct: 10, savingsAuto: false, balance: "", balanceSpend: true,
-        income: [{ id: uid(), name: "Paycheck (take-home)", amount: "", freq: "weekly" }],
+      state = { v: 2, isExample: false, savingsPct: 10, savingsAuto: false, balance: "", cushion: "",
+        income: [{ id: uid(), name: "Paycheck (take-home)", amount: "", freq: "weekly", next: "" }],
         expenses: [], budgets: base.budgets.map(b => ({ ...b, amount: "" })), debts: [],
-        card: { name: "Credit card", limit: "", dueDay: "", carried: 0 }, log: [], calc: base.calc };
+        card: { name: "Credit card", limit: "", dueDay: "", balance: "" }, log: [], calc: base.calc };
       tab = "income"; changed(); renderTabs(); renderPanel(); renderSummary();
     }
   });
@@ -877,9 +1005,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const r = target.closest(".row[data-list]");
     if (r && target.dataset.k) {
       const it = state[r.dataset.list].find(x => x.id === r.dataset.id);
-      if (it) { it[target.dataset.k] = value; return true; }
+      if (it) { it[target.dataset.k] = target.dataset.k === "paid" ? (value ? ymd(new Date()).slice(0, 7) : "") : value; return true; }
     }
-    if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value; return true; }
+    if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value;
+      if (target.dataset.path === "balance") state.balanceAt = Date.now();
+      if (target.dataset.path === "card.balance") state.card.balanceAt = Date.now();
+      return true; }
     return false;
   }
 
@@ -902,7 +1033,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     e.preventDefault();
     const amt = n($("qAmount").value);
     if (amt <= 0) { kpOpen($("qAmount")); return; }
-    state.log.push({ id: uid(), date: $("qDate").value || ymd(new Date()), amount: amt, note: $("qNote").value.trim(), cat: q.cat || "", method: q.method });
+    state.log.push({ id: uid(), at: Date.now(), date: $("qDate").value || ymd(new Date()), amount: amt, note: $("qNote").value.trim(), cat: q.cat || "", method: q.method });
     kpClose(); changed(); renderPanel(); renderSummary();
   });
 
