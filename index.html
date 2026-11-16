@@ -519,9 +519,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const stmtKnown = cFresh && state.card.statement !== undefined && state.card.statement !== "";
       const cardDueNow = stmtKnown ? Math.min(n(state.card.statement), cardNow0) : cardNow0;
       const cardNext = cardOwed - cardDueNow;
-      const stmtOnly = stmtKnown && state.card.mode === "statement";
+      const stmtOnly = stmtKnown && state.card.mode !== "full";
       const cardCount = stmtOnly ? cardDueNow : cardOwed;
-      const avail = beforeCard - cardCount - cushion;
+      const avail = beforeCard - cardCount; // the cushion is shown beside this, not taken off it
+      // When only the statement is paid this month, new card purchases belong to next month's bill, not this month's spending.
+      const todayCount = stmtOnly ? sum(monthLog.filter(e => !isCard(e) && e.date === todayS && since(e, bankAt, sY)), e => n(e.amount)) : todaySince;
+      const spentCount = bankSince + (stmtOnly ? 0 : cardSince);
       // Next month at a glance: a full month of pay against a full month of commitments.
       const nm = new Date(today.getFullYear(), today.getMonth() + 1, 1), nmEnd = ymd(new Date(nm.getFullYear(), nm.getMonth() + 1, 0));
       let incomeNext = 0;
@@ -535,10 +538,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const gone = (e, amt, auto) => { const d = Math.min(parseInt(e.due, 10) || 0, dim); return auto && e.paid !== monthS && (!e.freq || e.freq === "monthly") && d >= sDay && d <= dayN ? amt : 0; };
       const autoOut = sum(exp.filter(e => e.pay !== "card"), e => gone(e, n(e.amount), e.auto)) + sum(state.debts, d => gone({ due: d.due, paid: d.paid }, n(d.payment), d.auto));
       const expectedBank = n(state.balance) - bankSince - autoOut + incomeIn - (state.savingsAuto ? incomeIn * n(state.savingsPct) / 100 : 0);
-      const dayAllow = Math.max(avail + todaySince, 0) / daysLeft;
+      const dayAllow = Math.max(avail + todayCount, 0) / daysLeft;
       const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
       exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
-        bankSince, cardSince, todaySince, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+        bankSince, cardSince, todaySince: todayCount, spentCount, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
     }
     const stale = !exact && state.balance !== "" && !!bankAt;
 
@@ -567,7 +570,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
         sub = `${x.daysWeek} day${x.daysWeek === 1 ? "" : "s"} at ${money(x.dayAllow)} a day`;
       } else {
         label = "Left to spend until " + end;
-        value = x.avail; used = x.bankSince + x.cardSince; cap = Math.max(x.avail, 0) + used;
+        value = x.avail; used = x.spentCount; cap = Math.max(x.avail, 0) + used;
         sub = `After the bills, card and savings still to come · spent ${money(used)} since your balance`;
       }
     } else if (view === "day") {
@@ -625,8 +628,9 @@ body.kp-open .wrap { padding-bottom: 360px; }
       warn.textContent = `Your plan spends ${moneyR(-t.left)} a month more than you take home. Your wants add up to ${moneyR(t.wants)} a month; trimming those is the first place to look.`;
     } else warn.hidden = true;
 
-    const cShort = x ? -(x.avail + x.cushion) : t.cardTotal - t.capacity;
-    const cText = x && x.stmtKnown ? `<b>${money(x.cardDueNow)}</b> due by ${shortDate(x.endY)} · <b>${money(x.cardNext)}</b> next month`
+    const cShort = x ? -x.avail : t.cardTotal - t.capacity;
+    const cText = x && x.stmtOnly ? `<b>${money(x.cardDueNow)}</b> due by ${shortDate(x.endY)}`
+      : x && x.stmtKnown ? `<b>${money(x.cardDueNow)}</b> due by ${shortDate(x.endY)} · <b>${money(x.cardNext)}</b> next month`
       : x ? `<b>${money(x.cardOwed)}</b> to pay off` : `<b>${money(t.cardTotal)}</b> this month`;
     $("cardLine").innerHTML = `<span>${esc(state.card.name || "Credit card")}: ${cText}</span>
       <span class="pill ${cShort <= 0 ? "ok" : "no"}">${cShort <= 0 ? (x && x.stmtOnly ? "Can pay what's due" : "Can pay in full") : "Short " + moneyR(cShort)}</span>`;
@@ -655,8 +659,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
       ${line("Spent from bank or cash since " + asOf, x.bankSince, "−")}
       ${x.stmtOnly ? line(`${esc(state.card.name || "Credit card")} due by ${shortDate(x.endY)}`, x.cardDueNow, "−")
         : line(`${esc(state.card.name || "Credit card")} to pay off in full${x.stmtKnown ? ` (${money(x.cardDueNow)} due by ${shortDate(x.endY)}, ${money(x.cardNext)} next month)` : ""}`, x.cardOwed, "−")}
-      ${line("Cushion to keep in the bank", x.cushion, "−")}
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
+      ${x.cushion ? `<div><span>${x.avail >= x.cushion ? `Of that, above your ${money(x.cushion)} cushion` : `Short of your ${money(x.cushion)} cushion by`}</span><span class="${x.avail < x.cushion ? "bad" : ""}">${money(Math.abs(Math.round((x.avail - x.cushion) * 100) / 100))}</span></div>` : ""}
     </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>
       <details class="exact"><summary>${x.nmName}: about ${signed(Math.round(x.nextStart))} to spend</summary><div class="kv num">
         ${line(`Pay coming in ${x.nmName}`, x.incomeNext, "")}
@@ -847,7 +851,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const due = state.card.dueDay ? ` by the ${ordinal(state.card.dueDay)}` : "";
     const util = owed => lim > 0 ? `<div class="field"><span>Credit used: ${money(owed)} of ${moneyR(lim)} (${Math.round(owed / lim * 100)}%)</span><div class="meter${owed > lim * 0.3 ? " over" : ""}"><span style="width:${Math.min(owed / lim, 1) * 100}%"></span></div></div>` : "";
     if (x) {
-      const short = -(x.avail + x.cushion), ok = short <= 0, end = shortDate(x.endY);
+      const short = -x.avail, ok = short <= 0, end = shortDate(x.endY);
       const what = x.stmtOnly ? `the ${money(x.cardDueNow)} due by ${end}` : `the full ${money(x.cardOwed)}`;
       return `<div class="${ok ? "okbox" : "warn"}">${ok
           ? `You can pay ${what}. After that you'd still have <b>${moneyR(Math.max(x.avail, 0))}</b> to spend this month.`
@@ -887,8 +891,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
         
       </div>
       <label class="field"><span>Take off my spending money this month</span><select data-path="card.mode" id="cardMode">
-        <option value="full"${c.mode === "statement" ? "" : " selected"}>Everything on the card (stay fully paid up)</option>
-        <option value="statement"${c.mode === "statement" ? " selected" : ""}>Only what's due this month</option></select></label>
+        <option value="statement"${c.mode === "full" ? "" : " selected"}>Only what's due this month</option>
+        <option value="full"${c.mode === "full" ? " selected" : ""}>Everything on the card (stay fully paid up)</option></select></label>
       ${syncLine()}
       <div id="cardOut" class="card" style="padding:0;border:0">${cardHTML(t)}</div>
       <div class="note">Your card balance is set when you re-sync. Purchases you log with the card after that, and card bills still to be charged this month, are added on top.</div>`;
@@ -971,7 +975,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
         <div class="note">A paycheck already in your bank balance shouldn't be counted again, so pick the next one you haven't received.</div></div>` : ""}
       ${items.length ? `<div class="list"><h3>Tick what has already come out this month</h3>
         <div class="note">Ticked items are treated as already included in the balances above. Unticked ones are still to come and get set aside.${state.expenses.some(e => e.varies) ? " For bills that change, tap the amount to put in this month's figure once you know it. Until then the last amount is used as the estimate." : ""}</div>${items.join("")}</div>` : ""}
-      <div class="quick"><label class="field"><span>Cushion to always keep in the bank (optional)</span><div class="prefix dollar" data-p="$"><input type="number" id="syCushion" value="${esc(state.cushion)}" placeholder="0"></div></label></div>
+      <div class="quick"><label class="field"><span>Cushion to keep in the bank (optional, shown beside your spending number)</span><div class="prefix dollar" data-p="$"><input type="number" id="syCushion" value="${esc(state.cushion)}" placeholder="0"></div></label></div>
       <div class="warn" id="syMsg" hidden></div>
       <div class="sy-foot"><button type="button" class="btn" id="syCancel">Cancel</button><button type="button" class="btn primary" id="sySave">Save and re-sync</button></div>`;
     numify("#sync");
