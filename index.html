@@ -201,6 +201,13 @@ h1 { font-size: 21px; } h2 { font-size: 15px; } h3 { font-size: 14px; }
 .rh-v .sub { font-weight: 400; }
 .chev { color: var(--muted); font-size: 11px; }
 .row.open .chev { transform: rotate(180deg); }
+.rowtop { display: flex; align-items: center; min-width: 0; }
+.rowtop .rowhead { flex: 1; min-width: 0; padding-left: 8px; }
+div.rowhead { cursor: default; }
+.row.open > .rowtop { margin: 0; }
+.tick { width: 22px; height: 22px; margin: 0 0 0 10px; flex: none; accent-color: var(--accent); cursor: pointer; }
+.rh-t { white-space: nowrap; font-size: 12px; }
+.row.done .rh-n { color: var(--muted); }
 .rowmeter { margin: -2px 10px 8px; height: 4px; }
 .pill { font-size: 11px; padding: 1px 7px; }
 input[type=text], input[type=number], input[type=date], select { min-height: 38px; padding: 6px 8px; }
@@ -352,8 +359,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
     return out;
   }
   // How much of a bill is still to come this month, counting from day snapDay.
-  function dueLeft(e, snapDay, monthS, dim) {
-    if (e.paid === monthS) return 0;
+  // A bill ticked as paid after the last re-sync has left the bank since, so it still comes off that balance (at what it cost).
+  const debtBill = d => ({ amount: d.payment, due: d.due, paid: d.paid, unpaid: d.unpaid, paidAt: d.paidAt, paidAmt: d.paidAmt, hold: d.hold });
+  function dueLeft(e, snapDay, monthS, dim, snapAt) {
+    if (e.paid === monthS) return snapAt && +e.paidAt > snapAt ? n(e.paidAmt !== undefined && e.paidAmt !== "" ? e.paidAmt : e.amount) : 0;
     if (!e.freq || e.freq === "monthly") { const d = Math.min(parseInt(e.due, 10) || 0, dim); return (e.unpaid === monthS || !d || d >= snapDay) ? n(e.amount) : 0; }
     return monthly(e) * (dim - snapDay + 1) / dim;
   }
@@ -440,7 +449,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
 
   let state = EXAMPLE();
-  let tab = "spend";
+  let tab = "bills";
   let view = "day";
   try { const v = localStorage.getItem("monthly-budget-view"); if (SCALE[v]) view = v; } catch (_) {}
 
@@ -507,9 +516,9 @@ body.kp-open .wrap { padding-bottom: 360px; }
         else if (n(i.amount) > 0) { incomeLeft += monthly(i) * (dim - sDay) / dim; guessed = true; }
       }
       paydays.sort();
-      const bankBills = sum(exp.filter(e => e.pay !== "card"), e => dueLeft(e, sDay, monthS, dim));
-      const cardBills = sum(exp.filter(e => e.pay === "card"), e => dueLeft(e, cDay, monthS, dim));
-      const debtLeft = sum(state.debts, d => dueLeft({ amount: d.payment, due: d.due, paid: d.paid, unpaid: d.unpaid }, sDay, monthS, dim));
+      const bankBills = sum(exp.filter(e => e.pay !== "card"), e => dueLeft(e, sDay, monthS, dim, bankAt));
+      const cardBills = sum(exp.filter(e => e.pay === "card"), e => dueLeft(e, cDay, monthS, dim, cardAt));
+      const debtLeft = sum(state.debts, d => dueLeft(debtBill(d), sDay, monthS, dim, bankAt));
       const savingsLeft = incomeLeft * n(state.savingsPct) / 100;
       const isCard = e => e.method === "card";
       const bankSince = sum(monthLog.filter(e => !isCard(e) && since(e, bankAt, sY)), e => n(e.amount));
@@ -539,13 +548,16 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const nmName = nm.toLocaleDateString("en-US", { month: "long" });
       // What the bank itself should show today: autopay and paydays whose date has passed are assumed to have happened.
       const dayN = today.getDate();
-      const gone = (e, amt, auto) => { const d = Math.min(parseInt(e.due, 10) || 0, dim); return auto && e.paid !== monthS && (!e.freq || e.freq === "monthly") && d >= sDay && d <= dayN ? amt : 0; };
-      const autoOut = sum(exp.filter(e => e.pay !== "card"), e => gone(e, n(e.amount), e.auto)) + sum(state.debts, d => gone({ due: d.due, paid: d.paid }, n(d.payment), d.auto));
+      const gone = (e, amt, auto) => { const d = Math.min(parseInt(e.due, 10) || 0, dim);
+        if (e.paid === monthS) return +e.paidAt > bankAt ? n(e.paidAmt !== undefined && e.paidAmt !== "" ? e.paidAmt : amt) : 0;
+        return auto && e.hold !== monthS && (!e.freq || e.freq === "monthly") && d >= sDay && d <= dayN ? amt : 0; };
+      const cardPaidNow = state.card.paid === monthS && +state.card.paidAt > cardAt ? n(state.card.paidAmt) : 0;
+      const autoOut = sum(exp.filter(e => e.pay !== "card"), e => gone(e, n(e.amount), e.auto)) + sum(state.debts, d => gone(debtBill(d), n(d.payment), d.auto)) + cardPaidNow;
       const expectedBank = n(state.balance) - bankSince - autoOut + incomeIn - (state.savingsAuto ? incomeIn * n(state.savingsPct) / 100 : 0);
       const dayAllow = Math.max(avail + todayCount, 0) / daysLeft;
       const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
       exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
-        incomeIn, bankSince, cardSince, todaySince: todayCount, spentCount, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+        incomeIn, cardPaidNow, cardPayNow: stmtOnly ? cardDueNow : cardNow0 + cardSince, bankSince, cardSince, todaySince: todayCount, spentCount, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
     }
     const stale = !exact && state.balance !== "" && !!bankAt;
 
@@ -686,7 +698,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const asOf = new Date(x.bankAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const pd = x.paydays.length ? ` (${x.paydays.map(shortDate).join(", ")})` : "";
     const line = (l, v, sign) => v || sign === "" ? `<div><span>${l}</span><span>${sign}${money(Math.abs(v))}</span></div>` : "";
-    return `<details class="exact"${exactOpen ? " open" : ""}><summary>How this is worked out</summary><div class="kv num">
+    return `<details class="exact" data-keep="how"${keepOpen.how !== false ? " open" : ""}><summary>How this is worked out</summary><div class="kv num">
       ${line(`In the bank on ${asOf}`, x.bank, "")}
       ${x.guessed ? line("Pay still to come (estimate, set your next payday)", x.incomeLeft, "+") : line(`${x.paydays.length} paycheck${x.paydays.length === 1 ? "" : "s"} still to come${pd}`, x.incomeLeft, "+")}
       ${line("Bills still to come from the bank", x.bankBills, "−")}
@@ -698,7 +710,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
       ${x.cushion ? `<div><span>${x.avail >= x.cushion ? `Of that, above your ${money(x.cushion)} cushion` : `Short of your ${money(x.cushion)} cushion by`}</span><span class="${x.avail < x.cushion ? "bad" : ""}">${money(Math.abs(Math.round((x.avail - x.cushion) * 100) / 100))}</span></div>` : ""}
     </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>
-      <details class="exact"><summary>${x.nmName}: about ${signed(Math.round(x.nextStart + Math.max(x.avail, 0)))} to spend</summary><div class="kv num">
+      <details class="exact" data-keep="next"${keepOpen.next ? " open" : ""}><summary>${x.nmName}: about ${signed(Math.round(x.nextStart + Math.max(x.avail, 0)))} to spend</summary><div class="kv num">
         ${line(`Carried over from this month (what's left now)`, Math.max(x.avail, 0), "")}
         ${line(`Pay coming in ${x.nmName}`, x.incomeNext, "+")}
         ${line("Bills and loan payments", x.nextFixed, "−")}
@@ -708,13 +720,14 @@ body.kp-open .wrap { padding-bottom: 360px; }
       </div><div class="note">This assumes you carry over everything that's left this month. Each dollar you spend before ${shortDate(x.endY)} lowers it by a dollar${x.stmtOnly ? ", whether it's debit, cash or card" : ""}.${x.cushion ? ` It includes your ${money(x.cushion)} cushion.` : ""}</div></details>
       ${syncLine()}${reconHTML()}`;
   }
+  const keepOpen = {};
+  document.addEventListener("toggle", e => { if (e.target.dataset && e.target.dataset.keep) keepOpen[e.target.dataset.keep] = e.target.open; }, true);
   let exactOpen = true;
-  document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
 
   // ================= tabs =================
   const TABS = [
-    { key: "spend", label: "Spend" },
     { key: "bills", label: "Bills" },
+    { key: "spend", label: "Spend" },
     { key: "income", label: "Plan" },
     { key: "card", label: "Card" },
     { key: "debt", label: "Debt" },
@@ -741,16 +754,17 @@ body.kp-open .wrap { padding-bottom: 360px; }
   //   coming = set aside, date not reached yet (or no date)
   function billStatus(it, t, asDebt) {
     const x = t.exact; if (!x) return null;
-    const e = asDebt ? { amount: it.payment, due: it.due, paid: it.paid, unpaid: it.unpaid } : it;
-    if (dueLeft(e, !asDebt && it.pay === "card" ? x.cDay : x.sDay, t.monthS, t.dim) <= 0) return { code: "in" };
+    const e = asDebt ? debtBill(it) : it, card = !asDebt && it.pay === "card";
+    if (e.paid === t.monthS) return { code: "paid" };
+    if (dueLeft(e, card ? x.cDay : x.sDay, t.monthS, t.dim, card ? x.cardAt : x.bankAt) <= 0) return { code: "in" };
     const d = (!e.freq || e.freq === "monthly") ? Math.min(parseInt(e.due, 10) || 0, t.dim) : 0, day = t.today.getDate();
-    if (d && it.auto && d <= day) return { code: "auto", d };
+    if (d && it.auto && d <= day && e.hold !== t.monthS) return { code: "auto", d };
     if (d && !it.auto && d < day) return { code: "late", d };
     return { code: "coming", d };
   }
   function stillPill(it, t, asDebt) {
     const b = billStatus(it, t, asDebt); if (!b) return "";
-    if (b.code === "in") return '<span class="pill ok">Paid</span>';
+    if (b.code === "in" || b.code === "paid") return '<span class="pill ok">Paid</span>';
     if (b.code === "auto") return `<span class="pill ok">Auto-paid on the ${ordinal(b.d)}</span>`;
     if (b.code === "late") return `<span class="pill no">Was due on the ${ordinal(b.d)}</span>`;
     return `<span class="pill need">Set aside${b.d ? ", due " + ordinal(b.d) : ""}</span>`;
@@ -761,10 +775,20 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
   const paidBox = (list, it, t) => `<label class="check"><input type="checkbox" data-k="paid" id="${list}-paid-${it.id}"${it.paid === t.monthS ? " checked" : ""}> Already paid this month</label>`;
   const catSpent = (it, t) => t.monthLog.filter(e => e.cat === it.id).reduce((a, e) => a + n(e.amount), 0);
+  // Paid this month: ticked by you, already in the balances at re-sync, or autopay whose date has arrived.
+  function isPaid(it, t, asDebt) {
+    const b = billStatus(it, t, asDebt);
+    return b ? b.code === "paid" || b.code === "in" || b.code === "auto" : it.paid === t.monthS;
+  }
   function head(list, it, t) {
     const name = `<span class="rh-n">${esc(it.name || "Unnamed")}</span>`;
     if (list === "income") return `${name}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
-    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${headPill(it, t)}<span class="rh-v num">${it.varies ? "about " : ""}${money(monthly(it))}/mo</span>`;
+    if (list === "expenses") {
+      const b = billStatus(it, t), done = isPaid(it, t);
+      const tag = b && b.code === "auto" ? `Auto-paid ${ordinal(b.d)}` : done ? "Paid" : b && b.code === "late" ? `<span class="bad">Was due ${ordinal(b.d)}</span>` : (it.due ? `Due ${ordinal(it.due)}` : "") + (it.auto ? (it.due ? " · " : "") + "auto" : "");
+      const amt = it.paid === t.monthS && it.paidAmt !== undefined && it.paidAmt !== "" ? n(it.paidAmt) : (!it.freq || it.freq === "monthly") ? n(it.amount) : monthly(it);
+      return `${name}<span class="sub rh-t">${tag}</span><span class="rh-v num">${it.varies && !done ? "about " : ""}${money(amt)}${it.freq && it.freq !== "monthly" ? "/mo" : ""}</span>`;
+    }
     if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
     return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
   }
@@ -827,12 +851,6 @@ body.kp-open .wrap { padding-bottom: 360px; }
         <div><button class="btn primary" type="submit">Add purchase</button></div>
       </form>
 
-      <div class="group-title"><h3>Everyday spending limits</h3><span class="sub num">${moneyR(t.flex)}/mo</span></div>
-      <div class="list">${cats.length ? cats.map(c => row("budgets", c, `<div class="fields">${textField("budgets", c, "Category", "e.g. Groceries")}${moneyField("budgets", c, "amount", "Monthly limit")}</div>
-        <div class="fields even">${selectField("budgets", c, "kind", "Type", KIND)}</div>`, t)).join("") : '<div class="empty">No categories yet.</div>'}</div>
-      <div><button type="button" class="btn" data-add="budgets">Add category</button></div>
-      <div class="note">Tap a category to edit or delete it. ${t.exact ? "Your daily amount is what's left until the end of the month, spread over the days left." : `Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.`}</div>
-
       <div class="group-title"><h3>This month's purchases</h3><span class="sub num">${money(t.spentMonth)}</span></div>
       <div class="log">${recent.length ? recent.map(e => `<div class="log-item num">
           <span class="d">${fmtD(e.date)}</span>
@@ -840,6 +858,14 @@ body.kp-open .wrap { padding-bottom: 360px; }
           <b>${money(n(e.amount))}</b>
           <button type="button" class="btn del" data-dellog="${e.id}" aria-label="Delete purchase">Delete</button></div>`).join("") : '<div class="empty">Nothing logged this month yet.</div>'}</div>
 
+      <details class="exact" data-keep="limits"${keepOpen.limits ? " open" : ""}><summary>Categories and limits (optional)</summary><div class="list" style="margin-top:8px">
+
+      <div class="list">${cats.length ? cats.map(c => row("budgets", c, `<div class="fields">${textField("budgets", c, "Category", "e.g. Groceries")}${moneyField("budgets", c, "amount", "Monthly limit")}</div>
+        <div class="fields even">${selectField("budgets", c, "kind", "Type", KIND)}</div>`, t)).join("") : '<div class="empty">No categories yet.</div>'}</div>
+      <div><button type="button" class="btn" data-add="budgets">Add category</button></div>
+      <div class="note">Limits are optional. They show what you spent against each one and don't change your spending number. Tap a category to edit or delete it. ${t.exact ? "Your daily amount is what's left until the end of the month, spread over the days left." : `Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.`}</div>
+
+      </div></details>
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Past months</h3></div>
       <div class="list">${historyHTML(t)}</div>`;
   }
@@ -876,22 +902,37 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="chip"><span>Wants</span><b class="num" style="color:var(--c-want)">${moneyR(t.wants)}</b><span>you could cut these</span></div>`;
   }
   function panelBills(t) {
-    const exRow = e => row("expenses", e, `<div class="fields">${textField("expenses", e, "Bill or subscription", "e.g. Rent")}${moneyField("expenses", e, "amount", "Amount")}</div>
+    const x = t.exact, mName = t.today.toLocaleDateString("en-US", { month: "long" });
+    const tick = (key, done, name) => `<input type="checkbox" class="tick" data-paytick="${key}" id="tick-${key.replace(":", "-")}"${done ? " checked" : ""} aria-label="${esc(name)} paid this month">`;
+    const fields = e => `<div class="fields">${textField("expenses", e, "Bill or subscription", "e.g. Rent")}${moneyField("expenses", e, "amount", e.varies ? "Amount this month" : "Amount")}</div>
       <div class="fields even">${selectField("expenses", e, "freq", "How often", freqOpts(["monthly", "weekly", "biweekly", "quarterly", "semi", "yearly"]))}
       <label class="field"><span>Due day</span><input type="number" inputmode="numeric" min="1" max="31" data-k="due" id="expenses-due-${e.id}" value="${esc(e.due)}" placeholder="1–31"></label></div>
       <div class="fields even">${selectField("expenses", e, "kind", "Type", KIND)}${selectField("expenses", e, "pay", "Paid from", [["bank", "Bank account"], ["card", state.card.name || "Credit card"]])}</div>
       <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>
-      <label class="check"><input type="checkbox" data-k="varies" id="expenses-varies-${e.id}"${e.varies ? " checked" : ""}> Amount changes each month (this is an estimate)</label>`, t);
-    const auto = state.expenses.filter(e => e.auto), manual = state.expenses.filter(e => !e.auto);
-    const sumM = a => moneyR(a.reduce((s, e) => s + monthly(e), 0));
-    return `<div class="chips" id="chips">${chipsHTML(t)}</div>
-      <div class="group-title"><h3>Automatic</h3><span class="sub num">${sumM(auto)}/mo</span></div>
-      <div class="list">${auto.length ? auto.map(exRow).join("") : '<div class="empty">Nothing set to come out automatically.</div>'}</div>
-      <div class="group-title"><h3>Paid by you</h3><span class="sub num">${sumM(manual)}/mo</span></div>
-      <div class="list">${manual.length ? manual.map(exRow).join("") : '<div class="empty">Nothing here.</div>'}</div>
+      <label class="check"><input type="checkbox" data-k="varies" id="expenses-varies-${e.id}"${e.varies ? " checked" : ""}> Amount changes each month</label>`;
+    const items = [];
+    state.expenses.forEach(e => {
+      const done = isPaid(e, t), open = openRows.has(e.id), c = e.kind === "want" ? "var(--c-want)" : "var(--c-need)";
+      const amt = e.paid === t.monthS && e.paidAmt !== undefined && e.paidAmt !== "" ? n(e.paidAmt) : (!e.freq || e.freq === "monthly") ? n(e.amount) : monthly(e);
+      items.push({ done, due: parseInt(e.due, 10) || 99, amt, html: `<div class="row${open ? " open" : ""}${done ? " done" : ""}" data-list="expenses" data-id="${e.id}" style="--rowc:${c}">
+        <div class="rowtop">${tick("expenses:" + e.id, done, e.name)}<button type="button" class="rowhead" data-toggle="${e.id}" aria-expanded="${open}"><span class="rh">${head("expenses", e, t)}</span><span class="chev" aria-hidden="true">▼</span></button></div>
+        ${open ? `${fields(e)}<div class="meta"><div class="meta-l">${meta("expenses", e, t)}</div>${removeBtn("expenses", e)}</div>` : ""}</div>` });
+    });
+    const plain = (key, done, name, tag, amt, color, due) => items.push({ done, due, amt, html: `<div class="row${done ? " done" : ""}" style="--rowc:${color}">
+      <div class="rowtop">${tick(key, done, name)}<div class="rowhead"><span class="rh"><span class="rh-n">${esc(name)}</span><span class="sub rh-t">${tag}</span><span class="rh-v num">${money(amt)}</span></span></div></div></div>` });
+    state.debts.forEach(d => { if (n(d.payment) <= 0) return; const done = isPaid(d, t, true), b = billStatus(d, t, true);
+      plain("debts:" + d.id, done, d.name || "Loan", b && b.code === "auto" ? `Auto-paid ${ordinal(b.d)}` : done ? "Paid" : (d.due ? `Due ${ordinal(d.due)}` : "") + (d.auto ? (d.due ? " · " : "") + "auto" : ""), d.paid === t.monthS && d.paidAmt ? n(d.paidAmt) : n(d.payment), "var(--c-debt)", parseInt(d.due, 10) || 99); });
+    if (x) { const cPaid = state.card.paid === t.monthS, cAmt = cPaid ? n(state.card.paidAmt) : x.cardPayNow;
+      if (cPaid || cAmt > 0) plain("card", cPaid, (state.card.name || "Credit card") + " payment", cPaid ? "Paid" : `Due by ${shortDate(x.endY)}`, cAmt, "var(--c-auto)", parseInt(state.card.dueDay, 10) || t.dim); }
+    const todo = items.filter(i => !i.done).sort((a, b) => a.due - b.due), done = items.filter(i => i.done).sort((a, b) => a.due - b.due);
+    const tot = a => money(Math.round(a.reduce((s, i) => s + i.amt, 0) * 100) / 100);
+    return `<div class="group-title"><h3>Still to pay in ${mName}</h3><span class="sub num">${tot(todo)}</span></div>
+      <div class="list">${todo.length ? todo.map(i => i.html).join("") : `<div class="empty">${items.length ? "Everything is paid for " + mName + "." : "No bills yet. Add your first one below."}</div>`}</div>
+      <div class="group-title"><h3>Paid</h3><span class="sub num">${tot(done)}</span></div>
+      <div class="list">${done.length ? done.map(i => i.html).join("") : '<div class="empty">Nothing ticked off yet.</div>'}</div>
       <div class="field"><span>Tap to add a common one</span><div class="pick">${PRESETS.map((p, i) => `<button type="button" class="opt" data-preset="${i}">${p[0]}</button>`).join("")}</div></div>
       <div><button type="button" class="btn" data-add="expenses">Add something else</button></div>
-      <div class="note">Tap an item to edit or delete it. Mark anything that's a choice as a want. Bills that come every few months are spread across each month so you set money aside. Debt payments are on the Debt tab.</div>`;
+      <div class="note">Tick a bill when it's paid; everything unticks itself on the 1st. Tap a name to change the amount or details. Autopay bills tick themselves when their date arrives. Bills that come every few months show the monthly amount to set aside. Loans are edited on the Debt tab${x ? "" : ", and the card payment appears here once you've entered balances"}.</div>`;
   }
 
   function panelIncome(t) {
@@ -1014,6 +1055,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const pre = e => { // autopay whose date has arrived starts ticked; so does anything ticked before
       const d = (!e.freq || e.freq === "monthly") ? parseInt(e.due, 10) || 0 : 0;
       if (e.paid === t.monthS) return true;
+      if (e.hold === t.monthS) return false;
       if (d && e.auto && d <= day) return true;
       if (e.unpaid === t.monthS) return false;
       return d > 0 && d < day;
@@ -1031,15 +1073,15 @@ body.kp-open .wrap { padding-bottom: 360px; }
           <label class="field"><span>In your bank now</span><div class="prefix dollar" data-p="$"><input type="number" id="syBank" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
         </div>
         <div class="fields even">
-          <label class="field"><span>Card: total balance</span><div class="prefix dollar" data-p="$"><input type="number" id="syCard" value="${esc(state.card.balance)}" placeholder="0"></div></label>
-          <label class="field"><span>Card: due this month</span><div class="prefix dollar" data-p="$"><input type="number" id="syStmt" value="${esc(state.card.statement === undefined ? "" : state.card.statement)}" placeholder="Optional"></div></label>
+          <label class="field"><span>Card: total balance</span><div class="prefix dollar" data-p="$"><input type="number" id="syCard" value="${esc(t.exact && t.exact.cardPaidNow ? Math.max(0, Math.round((n(state.card.balance) - t.exact.cardPaidNow) * 100) / 100) : state.card.balance)}" placeholder="0"></div></label>
+          <label class="field"><span>Card: due this month</span><div class="prefix dollar" data-p="$"><input type="number" id="syStmt" value="${esc(t.exact && t.exact.cardPaidNow ? "0" : state.card.statement === undefined ? "" : state.card.statement)}" placeholder="Optional"></div></label>
         </div>
         <div class="note">On Apple Card, the total is "Card Balance" in Wallet and the amount due this month is "Monthly Balance" (tap the Pay button to see it). Enter what's still unpaid of each.</div>
         </div>
       </div>
       ${state.income.length ? `<div class="quick"><h3>Next payday</h3>${state.income.map(i => `<label class="field"><span>${esc(i.name || "Income")} · ${money(n(i.amount))}</span><input type="date" data-sy-next="${i.id}" id="sy-next-${i.id}" value="${esc(i.next || "")}"></label>`).join("")}
         <div class="note">A paycheck already in your bank balance shouldn't be counted again, so pick the next one you haven't received.</div></div>` : ""}
-      ${items.length ? `<div class="list"><h3>Tick what has already come out this month</h3>
+      ${items.length ? `<div class="list"><h3>Check what has already come out this month</h3>
         <div class="note">Ticked items are treated as already included in the balances above. Unticked ones are still to come and get set aside.${state.expenses.some(e => e.varies) ? " For bills that change, tap the amount to put in this month's figure once you know it. Until then the last amount is used as the estimate." : ""}</div>${items.join("")}</div>` : ""}
       <div class="quick"><label class="field"><span>Cushion to keep in the bank (optional, shown beside your spending number)</span><div class="prefix dollar" data-p="$"><input type="number" id="syCushion" value="${esc(state.cushion)}" placeholder="0"></div></label></div>
       <div class="warn" id="syMsg" hidden></div>
@@ -1058,11 +1100,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (x0) {
       const ticked = (list, id) => { const c = document.getElementById(`sy-${list}-${id}`); return !!(c && c.checked); };
       const amt = e => { const i = document.getElementById("sy-amt-" + e.id); return i && i.value.trim() !== "" ? n(i.value) : n(e.amount); };
-      const counted = (e, day) => dueLeft(e, day, t0.monthS, t0.dim) > 0;
+      const counted = (e, day, at) => dueLeft(e, day, t0.monthS, t0.dim, at) > 0;
       let bankExp = x0.bank - x0.bankSince + x0.incomeIn - (state.savingsAuto ? x0.incomeIn * n(state.savingsPct) / 100 : 0);
       let cardExp = x0.cardNow + x0.cardSince;
-      state.expenses.forEach(e => { const card = e.pay === "card"; if (counted(e, card ? x0.cDay : x0.sDay) && ticked("expenses", e.id)) { if (card) cardExp += amt(e); else bankExp -= amt(e); } });
-      state.debts.forEach(d => { if (counted({ amount: d.payment, due: d.due, paid: d.paid, unpaid: d.unpaid }, x0.sDay) && ticked("debts", d.id)) bankExp -= n(d.payment); });
+      state.expenses.forEach(e => { const card = e.pay === "card"; if (counted(e, card ? x0.cDay : x0.sDay, card ? x0.cardAt : x0.bankAt) && ticked("expenses", e.id)) { if (card) cardExp += amt(e); else bankExp -= amt(e); } });
+      state.debts.forEach(d => { if (counted(debtBill(d), x0.sDay, x0.bankAt) && ticked("debts", d.id)) bankExp -= n(d.payment); });
+      if (x0.cardPaidNow) { bankExp -= x0.cardPaidNow; cardExp -= x0.cardPaidNow; } // card payment ticked since the last re-sync
       const cardNew = n($("syCard").value);
       const cardPaid = Math.max(0, cardExp - cardNew);            // card lower than expected: a payment made from the bank
       const bankGap = Math.round((bankExp - cardPaid - n(bank)) * 100) / 100; // > 0: money left the bank that wasn't logged
@@ -1083,7 +1126,9 @@ body.kp-open .wrap { padding-bottom: 360px; }
     document.querySelectorAll("#sync [data-sy-next]").forEach(i => { const inc = state.income.find(x => x.id === i.dataset.syNext); if (inc) inc.next = i.value; });
     document.querySelectorAll("#sync [data-sy-paid]").forEach(c => {
       const [list, id] = c.dataset.syPaid.split(":"), it = state[list].find(x => x.id === id);
-      if (it) { it.paid = c.checked ? month : ""; it.unpaid = c.checked ? "" : month; }
+      if (!it) return;
+      if (c.checked) { if (it.paid !== month) { it.paidAmt = list === "debts" ? n(it.payment) : n(it.amount); } it.paid = month; it.paidAt = now - 1; it.unpaid = ""; it.hold = ""; }
+      else { const d = parseInt(it.due, 10) || 0; it.hold = it.auto && d && d <= new Date().getDate() ? month : ""; it.paid = ""; it.paidAt = ""; it.unpaid = month; }
     });
     document.querySelectorAll("#sync [data-sy-amt]").forEach(i => { const e = state.expenses.find(x => x.id === i.dataset.syAmt); if (e && i.value.trim() !== "") e.amount = i.value.trim(); });
     closeSync(); changed(); renderTabs(); renderPanel(); renderSummary();
@@ -1159,6 +1204,31 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const k = /^[0-9.]$/.test(e.key) ? e.key : e.key === "Backspace" ? "back" : (e.key === "Enter" || e.key === "Escape") ? "done" : null;
     if (k) { e.preventDefault(); kpKey(k); }
   });
+
+  // Tick or untick a bill, loan payment or the card payment for this month.
+  function payTick(key, checked) {
+    const t = compute(), now = Date.now(), m = t.monthS; let focus = null;
+    if (key === "card") {
+      if (checked) { state.card.paid = m; state.card.paidAt = now; state.card.paidAmt = t.exact ? Math.round(t.exact.cardPayNow * 100) / 100 : 0; }
+      else { state.card.paid = ""; state.card.paidAt = ""; }
+    } else {
+      const [list, id] = key.split(":"), it = state[list].find(v => v.id === id); if (!it) return;
+      const b = billStatus(it, t, list === "debts");
+      const snapAt = t.exact ? (list === "expenses" && it.pay === "card" ? t.exact.cardAt : t.exact.bankAt) : 0;
+      if (checked) {
+        // Re-ticking something that was already in the balances at the last re-sync puts it back that way.
+        const back = it.wasIn && it.wasIn === snapAt;
+        it.paid = m; it.paidAt = back ? snapAt - 1 : now; it.wasIn = ""; it.paidAmt = list === "debts" ? n(it.payment) : n(it.amount); it.unpaid = ""; it.hold = "";
+        if (list === "expenses" && it.varies) { openRows.add(id); focus = "expenses-amount-" + id; } // ask what it cost
+      } else {
+        if (b && (b.code === "in" || (b.code === "paid" && !(+it.paidAt > snapAt)))) it.wasIn = snapAt;
+        if (b && b.code === "auto") it.hold = m;
+        it.paid = ""; it.paidAt = ""; it.unpaid = m;
+      }
+    }
+    changed(); renderPanel(); renderSummary();
+    if (focus) kpOpen(document.getElementById(focus));
+  }
 
   // ================= events =================
   document.addEventListener("click", e => {
@@ -1237,6 +1307,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (r && target.dataset.k) {
       const it = state[r.dataset.list].find(x => x.id === r.dataset.id);
       if (it && r.dataset.list === "debts" && (target.dataset.k === "balance" || target.dataset.k === "due")) delete it.nextApply;
+      if (it && target.dataset.k === "amount" && it.paid === ymd(new Date()).slice(0, 7)) it.paidAmt = n(value);
       if (it) { it[target.dataset.k] = target.dataset.k === "paid" ? (value ? ymd(new Date()).slice(0, 7) : "") : value; return true; }
     }
     if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value;
@@ -1255,6 +1326,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   });
   document.addEventListener("change", e => {
     const tg = e.target;
+    if (tg.dataset.paytick) { payTick(tg.dataset.paytick, tg.checked); return; }
     if (tg.id === "saveAuto") { state.savingsAuto = tg.checked; changed(); renderSummary(); return; }
     if (tg.closest("#quickForm")) return;
     if (tg.tagName !== "SELECT" && tg.type !== "checkbox") return;
