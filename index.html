@@ -209,6 +209,18 @@ input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
 .btn { min-height: 38px; padding: 7px 12px; font-size: 13px; }
 textarea { width: 100%; min-height: 90px; font: 12px ui-monospace, Menlo, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.sync { position: fixed; inset: 0; z-index: 15; background: var(--bg); overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.sync-in { max-width: 660px; margin: 0 auto; padding: calc(16px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom)); display: grid; gap: 12px; }
+body.kp-open .sync-in { padding-bottom: 380px; }
+body.sync-open { overflow: hidden; }
+.sy-item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-height: 42px; cursor: pointer; }
+.sy-item input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.sy-item .n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sy-item .v { margin-left: auto; white-space: nowrap; color: var(--muted); }
+.sy-foot { position: sticky; bottom: 0; background: var(--bg); padding: 8px 0 4px; display: flex; gap: 8px; }
+.sy-foot .btn { flex: 1; min-height: 46px; font-size: 15px; }
+.syncline { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.syncline .btn { margin-left: auto; flex: none; }
 details.exact { background: var(--bg); border-radius: 10px; padding: 8px 10px; }
 details.exact summary { cursor: pointer; font-weight: 600; font-size: 13px; color: var(--muted); }
 details.exact .kv { margin-top: 8px; font-size: 13px; }
@@ -273,6 +285,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
   <section class="card" id="panel" role="tabpanel"></section>
 </div>
 
+<div class="sync" id="sync" role="dialog" aria-modal="true" aria-label="Re-sync balances" hidden><div class="sync-in" id="syncBody"></div></div>
+
 <div class="kp" id="kp" role="dialog" aria-label="Number pad" hidden>
   <div class="kp-head"><span class="label" id="kpLabel"></span><span class="kp-val num" id="kpVal"></span></div>
   <div class="kp-grid">
@@ -334,7 +348,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   // How much of a bill is still to come this month, counting from day snapDay.
   function dueLeft(e, snapDay, monthS, dim) {
     if (e.paid === monthS) return 0;
-    if (!e.freq || e.freq === "monthly") { const d = Math.min(parseInt(e.due, 10) || 0, dim); return (!d || d >= snapDay) ? n(e.amount) : 0; }
+    if (!e.freq || e.freq === "monthly") { const d = Math.min(parseInt(e.due, 10) || 0, dim); return (e.unpaid === monthS || !d || d >= snapDay) ? n(e.amount) : 0; }
     return monthly(e) * (dim - snapDay + 1) / dim;
   }
   const loanPayment = (P, aprPct, months) => {
@@ -489,7 +503,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       paydays.sort();
       const bankBills = sum(exp.filter(e => e.pay !== "card"), e => dueLeft(e, sDay, monthS, dim));
       const cardBills = sum(exp.filter(e => e.pay === "card"), e => dueLeft(e, cDay, monthS, dim));
-      const debtLeft = sum(state.debts, d => dueLeft({ amount: d.payment, due: d.due, paid: d.paid }, sDay, monthS, dim));
+      const debtLeft = sum(state.debts, d => dueLeft({ amount: d.payment, due: d.due, paid: d.paid, unpaid: d.unpaid }, sDay, monthS, dim));
       const savingsLeft = incomeLeft * n(state.savingsPct) / 100;
       const isCard = e => e.method === "card";
       const bankSince = sum(monthLog.filter(e => !isCard(e) && since(e, bankAt, sY)), e => n(e.amount));
@@ -549,7 +563,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       value = t.pool - t.spentMonth; used = t.spentMonth; cap = t.pool;
       sub = `Spent ${money(t.spentMonth)} of ${moneyR(t.pool)} on everyday spending`;
     }
-    $("exactBox").innerHTML = exactHTML(t);
+    $("exactBox").innerHTML = exactHTML(t); $("exactBox").style.cssText = "display:grid;gap:8px";
     $("heroLabel").textContent = label;
     $("heroNum").textContent = signed(value);
     $("heroNum").classList.toggle("neg", value < 0);
@@ -596,9 +610,15 @@ body.kp-open .wrap { padding-bottom: 360px; }
     $("exampleBanner").hidden = !state.isExample;
   }
 
+  function syncLine() {
+    const has = state.balance !== "" && state.balanceAt;
+    const when = has ? new Date(+state.balanceAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+    return `<div class="syncline num"><span>${has ? `Bank <b>${money(n(state.balance))}</b>${state.card.balance !== "" ? ` · Card <b>${money(n(state.card.balance))}</b>` : ""} <span class="sub">as of ${when}</span>` : "Balances not entered yet"}</span>
+      <button type="button" class="btn primary" data-sync>${has ? "Re-sync" : "Enter balances"}</button></div>`;
+  }
   function exactHTML(t) {
     const x = t.exact;
-    if (!x) return `<div class="autoline"><span>${t.stale ? "Your bank balance is from last month. Enter today's balance" : "This is an estimate from your monthly plan. Enter what's in your bank right now"} for an exact number.</span><button type="button" class="btn" data-tab="income" style="margin-left:auto;flex:none">Enter</button></div>`;
+    if (!x) return `<div class="autoline"><span>${t.stale ? "Your bank balance is from last month. Enter today's balance" : "This is an estimate from your monthly plan. Enter what's in your bank right now"} for an exact number.</span></div>${syncLine()}`;
     const asOf = new Date(x.bankAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
     const pd = x.paydays.length ? ` (${x.paydays.map(shortDate).join(", ")})` : "";
     const line = (l, v, sign) => v || sign === "" ? `<div><span>${l}</span><span>${sign}${money(Math.abs(v))}</span></div>` : "";
@@ -612,7 +632,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       ${line(`${esc(state.card.name || "Credit card")} to pay off in full`, x.cardOwed, "−")}
       ${line("Cushion to keep in the bank", x.cushion, "−")}
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
-    </div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Add it on the Card tab.</div>`}</details>`;
+    </div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>${syncLine()}`;
   }
   let exactOpen = true;
   document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
@@ -641,7 +661,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   // In exact mode, says whether a bill or loan payment is still counted against this month's money.
   function stillPill(it, t, asDebt) {
     const x = t.exact; if (!x) return "";
-    const e = asDebt ? { amount: it.payment, due: it.due, paid: it.paid } : it;
+    const e = asDebt ? { amount: it.payment, due: it.due, paid: it.paid, unpaid: it.unpaid } : it;
     const left = dueLeft(e, !asDebt && it.pay === "card" ? x.cDay : x.sDay, t.monthS, t.dim);
     return left > 0 ? '<span class="pill no">Still to come</span>' : '<span class="pill ok">Paid</span>';
   }
@@ -737,7 +757,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="fields even">${selectField("expenses", e, "freq", "How often", freqOpts(["monthly", "weekly", "biweekly", "quarterly", "semi", "yearly"]))}
       <label class="field"><span>Due day</span><input type="number" inputmode="numeric" min="1" max="31" data-k="due" id="expenses-due-${e.id}" value="${esc(e.due)}" placeholder="1–31"></label></div>
       <div class="fields even">${selectField("expenses", e, "kind", "Type", KIND)}${selectField("expenses", e, "pay", "Paid from", [["bank", "Bank account"], ["card", state.card.name || "Credit card"]])}</div>
-      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>${paidBox("expenses", e, t)}`, t);
+      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>`, t);
     const auto = state.expenses.filter(e => e.auto), manual = state.expenses.filter(e => !e.auto);
     const sumM = a => moneyR(a.reduce((s, e) => s + monthly(e), 0));
     return `<div class="chips" id="chips">${chipsHTML(t)}</div>
@@ -751,15 +771,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
 
   function panelIncome(t) {
-    const asOf = state.balance !== "" && state.balanceAt ? new Date(+state.balanceAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
-    return `<div class="quick">
-        <h3>Your money right now</h3>
-        <div class="fields even">
-          <label class="field"><span>In your bank right now</span><div class="prefix dollar" data-p="$"><input type="number" data-path="balance" id="bankBalance" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
-          <label class="field"><span>Cushion to keep</span><div class="prefix dollar" data-p="$"><input type="number" data-path="cushion" id="cushion" value="${esc(state.cushion)}" placeholder="0"></div></label>
-        </div>
-        <div class="note" id="balNote">${asOf ? `Entered ${asOf}. ` : ""}Enter your balance as it is today. From there the app adds only the paychecks still to come this month and takes off only the bills still to come. Re-enter it any time to re-sync.</div>
-      </div>
+    return `${syncLine()}
       <div class="group-title"><h3>Income</h3><span class="sub num">${moneyR(t.income)}/mo</span></div>
       <div class="list">${state.income.map(i => row("income", i, `<div class="fields">${textField("income", i, "Source", "e.g. Paycheck")}${moneyField("income", i, "amount", "Amount")}</div>
       <div class="fields even">${selectField("income", i, "freq", "How often", freqOpts(["weekly", "biweekly", "monthly", "yearly"]))}
@@ -803,7 +815,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
         ${t.carried ? `<div><span>Card balance entered</span><span>${money(t.carried)}</span></div>` : ""}
         <div class="tot"><span>Card total this month</span><span>${money(t.cardTotal)}</span></div>
       </div>${util(t.cardTotal)}
-      <div class="note">Enter your bank balance on the Income tab to make this exact.</div>`;
+      <div class="note">Enter your balances to make this exact.</div>`;
   }
   function panelCard(t) {
     const c = state.card;
@@ -813,10 +825,11 @@ body.kp-open .wrap { padding-bottom: 360px; }
       </div>
       <div class="fields even">
         <label class="field"><span>Payment due day</span><input type="number" inputmode="numeric" min="1" max="31" data-path="card.dueDay" id="cardDue" value="${esc(c.dueDay)}" placeholder="1–31"></label>
-        <label class="field"><span>Card balance right now</span><div class="prefix dollar" data-p="$"><input type="number" data-path="card.balance" id="cardBalance" value="${esc(c.balance)}" placeholder="Tap to enter"></div></label>
+        
       </div>
+      ${syncLine()}
       <div id="cardOut" class="card" style="padding:0;border:0">${cardHTML(t)}</div>
-      <div class="note">Enter the balance your card shows today. Purchases you log with the card after that, and card bills still to be charged this month, are added on top. Re-enter it any time to re-sync.</div>`;
+      <div class="note">Your card balance is set when you re-sync. Purchases you log with the card after that, and card bills still to be charged this month, are added on top.</div>`;
   }
 
   function calcHTML(t) {
@@ -848,7 +861,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <label class="field"><span>Interest (APR)</span><div class="prefix pct" data-p="%"><input type="number" inputmode="decimal" min="0" step="0.01" data-k="apr" id="debts-apr-${d.id}" value="${esc(d.apr)}"></div></label>
       ${moneyField("debts", d, "payment", "Monthly payment")}</div>
       <div class="fields even"><label class="field"><span>Due day</span><input type="number" min="1" max="31" data-k="due" id="debts-due-${d.id}" value="${esc(d.due)}" placeholder="1–31"></label></div>
-      <label class="check"><input type="checkbox" data-k="auto" id="debts-auto-${d.id}"${d.auto ? " checked" : ""}> Comes out automatically</label>${paidBox("debts", d, t)}`, t)).join("") : '<div class="empty">No loans. Your credit card is tracked on its own tab since you pay it in full.</div>'}</div>
+      <label class="check"><input type="checkbox" data-k="auto" id="debts-auto-${d.id}"${d.auto ? " checked" : ""}> Comes out automatically</label>`, t)).join("") : '<div class="empty">No loans. Your credit card is tracked on its own tab since you pay it in full.</div>'}</div>
       <div><button type="button" class="btn" data-add="debts">Add a loan</button></div>
 
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:14px"><h3>Can I afford a new loan?</h3></div>
@@ -861,12 +874,56 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="note">This checks the payment against money you haven't already planned for, after your savings. A common rule of thumb is to keep debt payments other than rent or a mortgage under about 10–20% of take-home pay. It's a planning aid, not financial advice.</div>`;
   }
 
+  const numify = root => document.querySelectorAll(root + ' input[type="number"]').forEach(i => { i.type = "text"; i.dataset.num = "1"; i.readOnly = true; i.inputMode = "none"; });
+
+  // ================= re-sync: the one place balances are set =================
+  function openSync() {
+    const t = compute(), day = t.today.getDate();
+    const pre = e => e.paid === t.monthS ? true : e.unpaid === t.monthS ? false : ((!e.freq || e.freq === "monthly") && parseInt(e.due, 10) > 0 && parseInt(e.due, 10) < day);
+    const item = (list, e, amt, tag) => `<label class="sy-item"><input type="checkbox" data-sy-paid="${list}:${e.id}" id="sy-${list}-${e.id}"${pre(e) ? " checked" : ""}><span class="n">${esc(e.name || "Unnamed")}</span>${tag}<span class="v num">${money(amt)}${e.due ? " · " + ordinal(e.due) : ""}</span></label>`;
+    const bank = state.expenses.filter(e => e.pay !== "card"), card = state.expenses.filter(e => e.pay === "card");
+    const items = [...bank.map(e => item("expenses", e, n(e.amount), "")), ...state.debts.map(d => item("debts", d, n(d.payment), "")), ...card.map(e => item("expenses", e, n(e.amount), '<span class="pill need">Card</span>'))];
+    $("syncBody").innerHTML = `
+      <h1>Re-sync</h1>
+      <div class="sub">Open your banking app and enter what it shows right now. Everything is recalculated from these numbers.</div>
+      <div class="quick">
+        <div class="fields even">
+          <label class="field"><span>In your bank now</span><div class="prefix dollar" data-p="$"><input type="number" id="syBank" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
+          <label class="field"><span>${esc(state.card.name || "Credit card")} balance now</span><div class="prefix dollar" data-p="$"><input type="number" id="syCard" value="${esc(state.card.balance)}" placeholder="0"></div></label>
+        </div>
+      </div>
+      ${state.income.length ? `<div class="quick"><h3>Next payday</h3>${state.income.map(i => `<label class="field"><span>${esc(i.name || "Income")} · ${money(n(i.amount))}</span><input type="date" data-sy-next="${i.id}" id="sy-next-${i.id}" value="${esc(i.next || "")}"></label>`).join("")}
+        <div class="note">A paycheck already in your bank balance shouldn't be counted again, so pick the next one you haven't received.</div></div>` : ""}
+      ${items.length ? `<div class="list"><h3>Tick what has already come out this month</h3>
+        <div class="note">Ticked items are treated as already included in the balances above. Unticked ones are still to come and get set aside.</div>${items.join("")}</div>` : ""}
+      <div class="quick"><label class="field"><span>Cushion to always keep in the bank (optional)</span><div class="prefix dollar" data-p="$"><input type="number" id="syCushion" value="${esc(state.cushion)}" placeholder="0"></div></label></div>
+      <div class="warn" id="syMsg" hidden></div>
+      <div class="sy-foot"><button type="button" class="btn" id="syCancel">Cancel</button><button type="button" class="btn primary" id="sySave">Save and re-sync</button></div>`;
+    numify("#sync");
+    $("sync").hidden = false; $("sync").scrollTop = 0; document.body.classList.add("sync-open");
+  }
+  function closeSync() { kpClose(); $("sync").hidden = true; $("syncBody").innerHTML = ""; document.body.classList.remove("sync-open"); }
+  function saveSync() {
+    const bank = $("syBank").value.trim();
+    if (bank === "") { $("syMsg").hidden = false; $("syMsg").textContent = "Enter what's in your bank right now."; $("sync").scrollTop = 0; return; }
+    const now = Date.now(), month = ymd(new Date()).slice(0, 7);
+    state.balance = bank; state.balanceAt = now;
+    state.card.balance = $("syCard").value.trim() === "" ? "0" : $("syCard").value.trim(); state.card.balanceAt = now;
+    state.cushion = $("syCushion").value.trim();
+    document.querySelectorAll("#sync [data-sy-next]").forEach(i => { const inc = state.income.find(x => x.id === i.dataset.syNext); if (inc) inc.next = i.value; });
+    document.querySelectorAll("#sync [data-sy-paid]").forEach(c => {
+      const [list, id] = c.dataset.syPaid.split(":"), it = state[list].find(x => x.id === id);
+      if (it) { it.paid = c.checked ? month : ""; it.unpaid = c.checked ? "" : month; }
+    });
+    closeSync(); changed(); renderTabs(); renderPanel(); renderSummary();
+  }
+
   function renderPanel() {
     const t = compute();
     $("panel").setAttribute("aria-labelledby", "tab-" + tab);
     $("panel").innerHTML = { spend: panelSpend, bills: panelBills, income: panelIncome, card: panelCard, debt: panelDebt }[tab](t);
     // Number fields use the on-screen keypad instead of the phone keyboard.
-    document.querySelectorAll('#panel input[type="number"]').forEach(i => { i.type = "text"; i.dataset.num = "1"; i.readOnly = true; i.inputMode = "none"; });
+    numify("#panel");
   }
   // Update derived text without redrawing inputs (keeps typing focus).
   function renderDerived() {
@@ -939,6 +996,9 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const num = e.target.closest("input[data-num]");
     if (num) { kpOpen(num); return; }
     if (kpInput && !e.target.closest("#kp")) kpClose();
+    if (e.target.closest("[data-sync]")) { openSync(); return; }
+    if (e.target.id === "syCancel") { closeSync(); return; }
+    if (e.target.id === "sySave") { saveSync(); return; }
     const tog = e.target.closest("[data-toggle]");
     if (tog) { const id = tog.dataset.toggle; if (openRows.has(id)) openRows.delete(id); else openRows.add(id); renderPanel(); return; }
     const opt = e.target.closest("[data-q]");
@@ -1061,7 +1121,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   // Save right away when the app is closed; refresh the daily numbers when it's reopened.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") { if (saveTimer) save(); }
-    else { renderSummary(); if (!kpInput && !document.activeElement.matches("input, select, textarea") && !($("bkBox") && !$("bkBox").hidden)) renderPanel(); }
+    else if ($("sync").hidden) { renderSummary(); if (!kpInput && !document.activeElement.matches("input, select, textarea") && !($("bkBox") && !$("bkBox").hidden)) renderPanel(); }
   });
   window.addEventListener("pagehide", () => { if (saveTimer) save(); });
 })();
