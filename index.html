@@ -203,6 +203,9 @@ h1 { font-size: 21px; } h2 { font-size: 15px; } h3 { font-size: 14px; }
 .rowmeter { margin: -2px 10px 8px; height: 4px; }
 .pill { font-size: 11px; padding: 1px 7px; }
 input[type=text], input[type=number], input[type=date], select { min-height: 38px; padding: 6px 8px; }
+input[type=date] { -webkit-appearance: none; appearance: none; display: block; max-width: 100%; min-width: 0; line-height: 24px; }
+input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
+.field, .field > div, .fields, .quick { min-width: 0; max-width: 100%; }
 .btn { min-height: 38px; padding: 7px 12px; font-size: 13px; }
 .btn.del { color: var(--bad); border-color: var(--bad); background: transparent; min-height: 34px; padding: 4px 12px; }
 .opt { min-height: 34px; padding: 5px 11px; font-size: 13px; }
