@@ -549,9 +549,31 @@ body.kp-open .wrap { padding-bottom: 360px; }
       monthLog, spentMonth, spentToday, spentWeek, pool, dayAllowance, weekPool, cardFixed, cardSpent, carried, cardTotal, bankFixed, bankSpent, capacity, cardRoom, projected };
   }
 
+  // Loan balances drop on their own: one payment (less that month's interest) each time the due day passes.
+  function payDate(dueDay, y, m) { const dim = new Date(y, m + 1, 0).getDate(); return new Date(y, m, Math.min(parseInt(dueDay, 10) || 1, dim)); }
+  function rollLoans() {
+    const today = new Date(), todayS = ymd(today); let changed = false;
+    for (const d of state.debts) {
+      if (!d.nextApply) { // first payment date after the balance was entered
+        let c = d.due ? payDate(d.due, today.getFullYear(), today.getMonth()) : payDate(1, today.getFullYear(), today.getMonth() + 1);
+        if (ymd(c) < todayS || d.paid === todayS.slice(0, 7)) c = payDate(d.due || 1, c.getFullYear(), c.getMonth() + 1);
+        d.nextApply = ymd(c); changed = true;
+      }
+      let g = 0;
+      while (d.nextApply <= todayS && g++ < 600) {
+        const bal = n(d.balance);
+        if (bal > 0 && n(d.payment) > 0) d.balance = String(Math.max(0, Math.round((bal + bal * n(d.apr) / 1200 - n(d.payment)) * 100) / 100));
+        const c = parseYmd(d.nextApply);
+        d.nextApply = ymd(payDate(d.due || 1, c.getFullYear(), c.getMonth() + 1)); changed = true;
+      }
+    }
+    return changed;
+  }
+
   // ================= summary =================
   const $ = id => document.getElementById(id);
   function renderSummary() {
+    if (rollLoans() && !state.isExample) { clearTimeout(saveTimer); saveTimer = setTimeout(save, 400); }
     const t = compute();
     document.querySelectorAll("#viewSeg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.view === view));
 
@@ -754,7 +776,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       if (n(it.balance) <= 0) return `<span>Paid off</span>`;
       if (p.never) return `<span class="bad">Payment must be over ${money(p.minNeeded)} just to cover interest</span>`;
       const d = new Date(); d.setMonth(d.getMonth() + p.months);
-      return `<span>Paid off in <b>${p.months} mo</b> (${monthName(d)})</span><span>Interest: <b>${moneyR(p.interest)}</b></span>${stillPill(it, t, true)}`;
+      return `<span>Paid off in <b>${p.months} mo</b> (${monthName(d)})</span><span>Interest: <b>${moneyR(p.interest)}</b></span>${stillPill(it, t, true)}${it.nextApply ? `<span style="flex:1 1 100%">Balance drops by itself after each payment. Next: ${shortDate(it.nextApply)}</span>` : ""}`;
     }
     return "";
   }
@@ -801,7 +823,36 @@ body.kp-open .wrap { padding-bottom: 360px; }
           <span class="d">${fmtD(e.date)}</span>
           <span class="w">${esc(e.note || catName(e.cat))} <small>· ${esc(catName(e.cat))} · ${e.method === "card" ? "Card" : e.method === "cash" ? "Cash" : "Debit"}</small></span>
           <b>${money(n(e.amount))}</b>
-          <button type="button" class="btn del" data-dellog="${e.id}" aria-label="Delete purchase">Delete</button></div>`).join("") : '<div class="empty">Nothing logged this month yet.</div>'}</div>`;
+          <button type="button" class="btn del" data-dellog="${e.id}" aria-label="Delete purchase">Delete</button></div>`).join("") : '<div class="empty">Nothing logged this month yet.</div>'}</div>
+
+      <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Past months</h3></div>
+      <div class="list">${historyHTML(t)}</div>`;
+  }
+
+  // Past months, built from the saved purchases and the balances recorded at each re-sync.
+  function historyHTML(t) {
+    const syncs = Array.isArray(state.syncs) ? state.syncs : [];
+    const months = new Set();
+    state.log.forEach(e => { if (e.date && e.date.slice(0, 7) < t.monthS) months.add(e.date.slice(0, 7)); });
+    syncs.forEach(x => { const m = ymd(new Date(x.at)).slice(0, 7); if (m < t.monthS) months.add(m); });
+    if (!months.size) return '<div class="empty">Past months will show up here once this month ends, with what you spent in each category.</div>';
+    const catName = e => e.catName || (state.budgets.find(c => c.id === e.cat) || {}).name || "Other";
+    return [...months].sort().reverse().map(m => {
+      const id = "hist-" + m, open = openRows.has(id), es = state.log.filter(e => e.date && e.date.startsWith(m));
+      const total = es.reduce((a, e) => a + n(e.amount), 0), card = es.filter(e => e.method === "card").reduce((a, e) => a + n(e.amount), 0);
+      const title = parseYmd(m + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      let body = "";
+      if (open) {
+        const by = {}; es.forEach(e => { by[catName(e)] = (by[catName(e)] || 0) + n(e.amount); });
+        const last = syncs.filter(x => ymd(new Date(x.at)).startsWith(m)).pop();
+        body = `<div class="kv num">${Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `<div><span>${esc(k)}</span><span>${money(v)}</span></div>`).join("")}
+            <div class="tot"><span>Spent</span><span>${money(total)}</span></div>
+            <div><span>On the card</span><span>${money(card)}</span></div><div><span>Debit and cash</span><span>${money(total - card)}</span></div>
+            ${last ? `<div><span>Last re-sync (${shortDate(ymd(new Date(last.at)))})</span><span>Bank ${money(last.bank)} · Card ${money(last.card)}</span></div>` : ""}</div>
+          <div class="log">${[...es].sort((a, b) => b.date.localeCompare(a.date)).map(e => `<div class="log-item num"><span class="d">${shortDate(e.date)}</span><span class="w">${esc(e.note || catName(e))} <small>· ${esc(catName(e))}</small></span><b>${money(n(e.amount))}</b><span></span></div>`).join("") || '<div class="empty">No purchases logged.</div>'}</div>`;
+      }
+      return `<div class="row${open ? " open" : ""}" style="--rowc:var(--c-free)"><button type="button" class="rowhead" data-toggle="${id}" aria-expanded="${open}"><span class="rh"><span class="rh-n">${title}</span><span class="rh-v num">${money(total)} <span class="sub">spent</span></span></span><span class="chev" aria-hidden="true">▼</span></button>${body}</div>`;
+    }).join("");
   }
 
   function chipsHTML(t) {
@@ -990,6 +1041,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
     state.card.balance = $("syCard").value.trim() === "" ? "0" : $("syCard").value.trim(); state.card.balanceAt = now;
     state.card.statement = $("syStmt").value.trim();
     state.cushion = $("syCushion").value.trim();
+    if (!Array.isArray(state.syncs)) state.syncs = [];
+    state.syncs.push({ at: now, bank: n(bank), card: n(state.card.balance) }); if (state.syncs.length > 300) state.syncs.shift();
     document.querySelectorAll("#sync [data-sy-next]").forEach(i => { const inc = state.income.find(x => x.id === i.dataset.syNext); if (inc) inc.next = i.value; });
     document.querySelectorAll("#sync [data-sy-paid]").forEach(c => {
       const [list, id] = c.dataset.syPaid.split(":"), it = state[list].find(x => x.id === id);
@@ -1146,6 +1199,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const r = target.closest(".row[data-list]");
     if (r && target.dataset.k) {
       const it = state[r.dataset.list].find(x => x.id === r.dataset.id);
+      if (it && r.dataset.list === "debts" && (target.dataset.k === "balance" || target.dataset.k === "due")) delete it.nextApply;
       if (it) { it[target.dataset.k] = target.dataset.k === "paid" ? (value ? ymd(new Date()).slice(0, 7) : "") : value; return true; }
     }
     if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value;
@@ -1174,7 +1228,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     e.preventDefault();
     const amt = n($("qAmount").value);
     if (amt <= 0) { kpOpen($("qAmount")); return; }
-    state.log.push({ id: uid(), at: Date.now(), date: $("qDate").value || ymd(new Date()), amount: amt, note: $("qNote").value.trim(), cat: q.cat || "", method: q.method });
+    state.log.push({ id: uid(), at: Date.now(), catName: (state.budgets.find(c => c.id === q.cat) || {}).name || "", date: $("qDate").value || ymd(new Date()), amount: amt, note: $("qNote").value.trim(), cat: q.cat || "", method: q.method });
     kpClose(); changed(); renderPanel(); renderSummary();
   });
 
