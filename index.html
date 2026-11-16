@@ -84,6 +84,7 @@ header { display: flex; justify-content: space-between; align-items: baseline; g
 .seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 3px; gap: 2px; justify-self: start; }
 .seg button { border: 0; background: transparent; color: var(--muted); font: 600 14px var(--body); padding: 6px 16px; border-radius: 7px; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+#planBox .planhead { border-top: 0; padding-top: 0; }
 .planhead { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; flex-wrap: wrap; }
 .autoline { display: flex; align-items: center; gap: 10px; font-size: 14px; background: var(--bg); border-radius: 10px; padding: 10px 12px; }
 .autoline i { width: 10px; height: 10px; border-radius: 50%; background: var(--c-auto); flex: none; }
@@ -266,6 +267,11 @@ body.kp-open .wrap { padding-bottom: 360px; }
     <div class="meter" id="heroMeter"><span></span></div>
     <div id="exactBox"></div>
 
+    <div class="cardline num" id="cardLine"></div>
+  </section>
+
+  <nav class="tabs" role="tablist" id="tabs"></nav>
+  <section class="card" id="planBox" aria-labelledby="planTitle" hidden>
     <div class="planhead"><h2 id="planTitle">Your plan</h2><span class="sub num" id="planIncome"></span></div>
     <div class="bar" id="bar" aria-hidden="true"></div>
     <div class="legend num" id="legend"></div>
@@ -280,10 +286,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <label class="check"><input type="checkbox" id="saveAuto"> Savings transfer is automatic</label>
     </div>
     <div class="warn" id="overWarn" hidden></div>
-    <div class="cardline num" id="cardLine"></div>
+    <div class="note">This is a typical month, used for planning and for next month's preview. Once your balances are entered, the number at the top comes from them, not from this plan.</div>
   </section>
-
-  <nav class="tabs" role="tablist" id="tabs"></nav>
   <section class="card" id="panel" role="tabpanel"></section>
 </div>
 
@@ -711,11 +715,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
   const TABS = [
     { key: "spend", label: "Spend" },
     { key: "bills", label: "Bills" },
-    { key: "income", label: "Income" },
+    { key: "income", label: "Plan" },
     { key: "card", label: "Card" },
     { key: "debt", label: "Debt" },
   ];
   function renderTabs() {
+    $("planBox").hidden = tab !== "income";
     $("tabs").innerHTML = TABS.map(x =>
       `<button type="button" role="tab" id="tab-${x.key}" data-tab="${x.key}" aria-selected="${x.key === tab}" aria-controls="panel">${x.label}</button>`).join("");
   }
