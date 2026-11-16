@@ -384,6 +384,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     income: [{ id: uid(), name: "Paycheck (take-home)", amount: 900, freq: "weekly", next: nextFriday() }],
     expenses: [
       { id: uid(), name: "Rent", amount: 1400, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 1 },
+      { id: uid(), name: "Car loan", amount: 310, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 28 },
       { id: uid(), name: "Electric", amount: 90, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 15, varies: true },
       { id: uid(), name: "Car insurance", amount: 720, freq: "semi", kind: "need", auto: true, pay: "bank", due: "" },
       { id: uid(), name: "Internet", amount: 65, freq: "monthly", kind: "need", auto: true, pay: "card", due: 20 },
@@ -399,7 +400,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       { id: "shop", name: "Shopping", amount: 100, kind: "want" },
       { id: "fun", name: "Fun & hobbies", amount: 80, kind: "want" },
     ],
-    debts: [{ id: uid(), name: "Car loan", balance: 9800, apr: 6.9, payment: 310, auto: true, due: 28 }],
+    debts: [],
     card: { name: "Credit card", limit: 3000, dueDay: 25, balance: 120, balanceAt: Date.now() },
     log: [
       { id: uid(), date: daysAgo(0), amount: 6.5, note: "Coffee", cat: "dine", method: "card" },
@@ -417,6 +418,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (s.balance !== "" && !s.balanceAt) s.balanceAt = Date.now();
     if (s.cushion === undefined) s.cushion = "";
     delete s.balanceSpend;
+    // Loans are now ordinary bills on the checklist.
+    if (Array.isArray(s.debts) && s.debts.length) {
+      s.debts.forEach(d => { if (n(d.payment) > 0) s.expenses.push({ id: d.id || uid(), name: d.name || "Loan", amount: d.payment, freq: "monthly", kind: "need", auto: !!d.auto, pay: "bank", due: d.due || "",
+        paid: d.paid || "", paidAt: d.paidAt || "", paidAmt: d.paidAmt, unpaid: d.unpaid || "", hold: d.hold || "" }); });
+      s.debts = [];
+    }
     s.card = Object.assign({ name: "Credit card", limit: "", dueDay: "", balance: "" }, s.card || {});
     if (s.card.carried !== undefined) { if (s.card.balance === "" && n(s.card.carried) > 0) s.card.balance = s.card.carried; delete s.card.carried; }
     return s;
@@ -643,7 +650,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const parts = [
       ["Needs", t.needs, "var(--c-need)"],
       ["Wants", t.wants, "var(--c-want)"],
-      ["Debt payments", t.debt, "var(--c-debt)"],
+      ...(t.debt > 0 ? [["Debt payments", t.debt, "var(--c-debt)"]] : []),
       ["Savings", t.savings, "var(--c-save)"],
       ["Unassigned", Math.max(t.left, 0), "var(--c-free)"],
     ];
@@ -722,7 +729,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <details class="exact" data-keep="next"${keepOpen.next ? " open" : ""}><summary>${x.nmName}: about ${signed(Math.round(x.nextStart + Math.max(x.avail, 0)))} to spend</summary><div class="kv num">
         ${line(`Carried over from this month (what's left now)`, Math.max(x.avail, 0), "")}
         ${line(`Pay coming in ${x.nmName}`, x.incomeNext, "+")}
-        ${line("Bills and loan payments", x.nextFixed, "−")}
+        ${line("Bills", x.nextFixed, "−")}
         ${line("Savings", x.nextSave, "−")}
         ${line(`${esc(state.card.name || "Credit card")} charges from this month`, x.nextCard, "−")}
         <div class="tot"><span>To spend in ${x.nmName}</span><span class="${x.nextStart + Math.max(x.avail, 0) < 0 ? "bad" : ""}">${signed(Math.round(x.nextStart + Math.max(x.avail, 0)))}</span></div>
@@ -739,7 +746,6 @@ body.kp-open .wrap { padding-bottom: 360px; }
     { key: "spend", label: "Spend" },
     { key: "income", label: "Plan" },
     { key: "card", label: "Card" },
-    { key: "debt", label: "Debt" },
   ];
   function renderTabs() {
     $("planBox").hidden = tab !== "income";
@@ -941,7 +947,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="list">${done.length ? done.map(i => i.html).join("") : '<div class="empty">Nothing ticked off yet.</div>'}</div>
       <div class="field"><span>Tap to add a common one</span><div class="pick">${PRESETS.map((p, i) => `<button type="button" class="opt" data-preset="${i}">${p[0]}</button>`).join("")}</div></div>
       <div><button type="button" class="btn" data-add="expenses">Add something else</button></div>
-      <div class="note">Tick a bill when it's paid; everything unticks itself on the 1st. Tap a name to change the amount or details. Autopay bills tick themselves when their date arrives. Bills that come every few months show the monthly amount to set aside. Loans are edited on the Debt tab${x ? "" : ", and the card payment appears here once you've entered balances"}.</div>`;
+      <div class="note">Tick a bill when it's paid; everything unticks itself on the 1st. Tap a name to change the amount or details. Autopay bills tick themselves when their date arrives. Bills that come every few months show the monthly amount to set aside.${x ? "" : " The card payment appears here once you've entered balances."} A loan is just another bill: add it with its monthly payment.</div>`;
   }
 
   function panelIncome(t) {
@@ -952,6 +958,14 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <label class="field"><span>Next payday</span><input type="date" data-k="next" id="income-next-${i.id}" value="${esc(i.next || "")}"></label></div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
       <div><button type="button" class="btn primary" data-add="income">Add income</button></div>
       <div class="note">Use take-home pay, after taxes and anything your employer deducts. Set the next payday so the app knows how many paychecks are still to come this month.</div>
+      <details class="exact" data-keep="calc"${keepOpen.calc ? " open" : ""}><summary>Can I afford a new monthly payment?</summary><div class="list" style="margin-top:8px">${(c => `
+      <div class="fields three">
+        <label class="field"><span>Loan amount</span><div class="prefix dollar" data-p="$"><input type="number" inputmode="decimal" min="0" data-path="calc.amount" id="calcAmt" value="${esc(c.amount)}"></div></label>
+        <label class="field"><span>Interest (APR)</span><div class="prefix pct" data-p="%"><input type="number" inputmode="decimal" min="0" step="0.01" data-path="calc.apr" id="calcApr" value="${esc(c.apr)}"></div></label>
+        <label class="field"><span>Term</span><div class="prefix mo" data-p="mo"><input type="number" inputmode="numeric" min="1" data-path="calc.months" id="calcMonths" value="${esc(c.months)}"></div></label>
+      </div>
+      <div id="calcOut" class="card" style="padding:0;border:0">${calcHTML(t)}</div>
+      <div class="note">This checks the payment against money you haven't already planned for, after your savings. A common rule of thumb is to keep debt payments other than rent or a mortgage under about 10–20% of take-home pay. It's a planning aid, not financial advice.</div>`)(state.calc)}</div></details>
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Backup</h3></div>
       <div class="note">Your budget is stored only in this app on this device. Copy a backup now and then and keep it in Notes, so you can restore it if the data is ever cleared or you move to a new phone.</div>
       <div class="btnrow"><button type="button" class="btn" id="bkCopy">Copy backup</button><button type="button" class="btn" id="bkShow">Restore from a backup</button></div>
@@ -1171,12 +1185,12 @@ body.kp-open .wrap { padding-bottom: 360px; }
   const q = { cat: null, method: "card" };
   const PRESETS = [["Rent", "need", true, "bank"], ["Electric", "need", true, "bank", true], ["Water", "need", false, "bank", true], ["Internet", "need", true, "card"], ["Phone", "need", true, "card"],
     ["Car insurance", "need", true, "bank"], ["Streaming", "want", true, "card"], ["Music", "want", true, "card"], ["Gym", "want", true, "card"], ["Cloud storage", "want", true, "card"]];
-  let kpInput = null, kpStr = "", kpFresh = true;
+  let kpInput = null, kpStr = "", kpFresh = true, kpOpenedAt = 0;
   function kpShow() { $("kpVal").textContent = (kpInput.closest(".dollar") ? "$" : "") + (kpStr || "0") + (kpInput.closest(".pct") ? "%" : ""); }
   function kpOpen(inp) {
     if (!inp || kpInput === inp) return;
     if (kpInput) kpInput.classList.remove("kp-active");
-    kpInput = inp; kpStr = inp.value || ""; kpFresh = true;
+    kpInput = inp; kpStr = inp.value || ""; kpFresh = true; kpOpenedAt = Date.now();
     inp.classList.add("kp-active");
     const f = inp.closest(".field"), r = inp.closest(".row"), nm = r && r.querySelector('[data-k="name"]');
     $("kpLabel").textContent = (nm && nm.value ? nm.value + " · " : "") + (f ? f.querySelector("span").textContent : "Amount");
@@ -1248,7 +1262,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
     if (key) { kpKey(key.dataset.key); return; }
     const num = e.target.closest("input[data-num]");
     if (num) { kpOpen(num); return; }
-    if (kpInput && !e.target.closest("#kp")) kpClose();
+    // The page scrolls as the keypad opens, so the tap that opened it can land elsewhere: don't let that same tap close it.
+    if (kpInput && !e.target.closest("#kp")) { if (Date.now() - kpOpenedAt < 500) return; kpClose(); }
     if (e.target.closest("[data-sync]")) { openSync(); return; }
     if (e.target.id === "syCancel") { closeSync(); return; }
     if (e.target.id === "sySave") { saveSync(); return; }
