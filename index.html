@@ -8,8 +8,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Budget">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" content="#f2f4f3" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#111715" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eef1f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#10151b" media="(prefers-color-scheme: dark)">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -18,22 +18,22 @@
 <style>
 /* Layout: one narrow column. Summary (with Day/Week/Month switch) first, then tabbed sections edited in place. */
 :root {
-  --bg: #f2f4f3;
+  --bg: #eef1f5;
   --surface: #ffffff;
-  --ink: #17201d;
-  --muted: #5f6b67;
-  --line: #dde3e0;
-  --accent: #1d6b57;
-  --accent-soft: #e2efe9;
+  --ink: #18212b;
+  --muted: #5b6878;
+  --line: #d5dce5;
+  --accent: #3a6ea5;
+  --accent-soft: #e1eaf4;
   --good: #1d7a4a;
   --good-soft: #e3f3e9;
   --bad: #b3261e;
   --bad-soft: #fbe9e7;
-  --c-need: #3b6fb6;
+  --c-need: #2c4a6b;
   --c-want: #d08a1e;
   --c-debt: #c2504a;
-  --c-save: #1d6b57;
-  --c-free: #9fb5ad;
+  --c-save: #2e8b7a;
+  --c-free: #a9b6c6;
   --c-auto: #6a55b8;
   --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
   --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -41,16 +41,16 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #111715; --surface: #1a2220; --ink: #e6ece9; --muted: #9aa8a3; --line: #2c3633;
-    --accent: #5cc3a3; --accent-soft: #1d332c; --good: #5fcf8f; --good-soft: #17301f; --bad: #f08a80; --bad-soft: #3a1f1d;
-    --c-need: #6f9ee0; --c-want: #e8a94a; --c-debt: #e47b74; --c-save: #5cc3a3; --c-free: #4d5d58; --c-auto: #a594e8;
+    --bg: #10151b; --surface: #18202a; --ink: #e3e9f0; --muted: #94a2b3; --line: #293442;
+    --accent: #7fb0de; --accent-soft: #1c2a3a; --good: #5fcf8f; --good-soft: #17301f; --bad: #f08a80; --bad-soft: #3a1f1d;
+    --c-need: #a9bfd6; --c-want: #e8a94a; --c-debt: #e47b74; --c-save: #5cc3b0; --c-free: #4a5868; --c-auto: #a594e8;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --bg: #111715; --surface: #1a2220; --ink: #e6ece9; --muted: #9aa8a3; --line: #2c3633;
-  --accent: #5cc3a3; --accent-soft: #1d332c; --good: #5fcf8f; --good-soft: #17301f; --bad: #f08a80; --bad-soft: #3a1f1d;
-  --c-need: #6f9ee0; --c-want: #e8a94a; --c-debt: #e47b74; --c-save: #5cc3a3; --c-free: #4d5d58; --c-auto: #a594e8;
+  --bg: #10151b; --surface: #18202a; --ink: #e3e9f0; --muted: #94a2b3; --line: #293442;
+  --accent: #7fb0de; --accent-soft: #1c2a3a; --good: #5fcf8f; --good-soft: #17301f; --bad: #f08a80; --bad-soft: #3a1f1d;
+  --c-need: #a9bfd6; --c-want: #e8a94a; --c-debt: #e47b74; --c-save: #5cc3b0; --c-free: #4a5868; --c-auto: #a594e8;
   color-scheme: dark;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -175,7 +175,44 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
   .chips { grid-template-columns: minmax(0, 1fr); }
   .quick .fields { grid-template-columns: minmax(0, 1fr); }
 }
-@media (prefers-reduced-motion: no-preference) { .bar span, .meter span { transition: width .25s ease; } }
+@media (prefers-reduced-motion: no-preference) { .bar span, .meter span { transition: width .25s ease; } .chev { transition: transform .15s; } }
+/* Compact layout: rows are one line until tapped open. */
+body { font-size: 14px; }
+.wrap { gap: 10px; }
+h1 { font-size: 21px; } h2 { font-size: 15px; } h3 { font-size: 14px; }
+.card { padding: 12px; gap: 10px; border-radius: 12px; }
+.big { font-size: 36px; }
+.sub { font-size: 13px; }
+.legend { font-size: 13px; gap: 3px 14px; }
+.autoline { padding: 7px 10px; font-size: 13px; }
+.planhead { padding-top: 10px; }
+.seg button { padding: 5px 14px; font-size: 13px; }
+.banner { padding: 8px 12px; font-size: 13px; }
+.list { gap: 6px; }
+.row { padding: 0; gap: 0; border-radius: 10px; border-left-width: 3px; scroll-margin-top: 10px; }
+.row.open { padding-bottom: 10px; gap: 8px; background: var(--bg); }
+.row.open > :not(.rowhead) { margin: 0 10px; }
+.row.open input, .row.open select { background: var(--surface); }
+.rowhead { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 6px 10px; border: 0; background: transparent; color: var(--ink); font: 500 14px var(--body); text-align: left; cursor: pointer; border-radius: 10px; }
+.rh { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.rh-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rh-v { margin-left: auto; white-space: nowrap; font-weight: 600; }
+.rh-v .sub { font-weight: 400; }
+.chev { color: var(--muted); font-size: 11px; }
+.row.open .chev { transform: rotate(180deg); }
+.rowmeter { margin: -2px 10px 8px; height: 4px; }
+.pill { font-size: 11px; padding: 1px 7px; }
+input[type=text], input[type=number], input[type=date], select { min-height: 38px; padding: 6px 8px; }
+.btn { min-height: 38px; padding: 7px 12px; font-size: 13px; }
+.btn.del { color: var(--bad); border-color: var(--bad); background: transparent; min-height: 34px; padding: 4px 12px; }
+.opt { min-height: 34px; padding: 5px 11px; font-size: 13px; }
+.quick { padding: 10px; gap: 8px; scroll-margin-top: 10px; }
+.chips { gap: 6px; } .chip { padding: 8px; } .chip b { font-size: 16px; }
+.log-item { padding: 5px 0; font-size: 13px; grid-template-columns: 48px minmax(0, 1fr) auto auto; gap: 8px; }
+.kp { padding-top: 10px; gap: 8px; }
+.kp-grid { gap: 6px; } .kp-grid button { height: 50px; font-size: 22px; } .kp-val { font-size: 26px; }
+body.kp-open .wrap { padding-bottom: 360px; }
+.tabs button { min-height: 40px; }
 </style>
 </head>
 <body>
@@ -494,7 +531,16 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
   const selectField = (list, it, k, label, opts) => `<label class="field"><span>${label}</span><select data-k="${k}" id="${list}-${k}-${it.id}">${opts.map(([v, l]) => `<option value="${v}"${String(it[k]) === v ? " selected" : ""}>${l}</option>`).join("")}</select></label>`;
   const freqOpts = keys => keys.map(k => [k, FREQ[k].label]);
   const KIND = [["need", "Need"], ["want", "Want / luxury"]];
-  const removeBtn = (list, it) => `<button type="button" class="btn link" data-del="${it.id}" data-list="${list}" aria-label="Remove ${esc(it.name) || "item"}">Remove</button>`;
+  const removeBtn = (list, it) => `<button type="button" class="btn del" data-del="${it.id}" data-list="${list}" aria-label="Delete ${esc(it.name) || "item"}">Delete</button>`;
+  const openRows = new Set();
+  const catSpent = (it, t) => t.monthLog.filter(e => e.cat === it.id).reduce((a, e) => a + n(e.amount), 0);
+  function head(list, it, t) {
+    const name = `<span class="rh-n">${esc(it.name || "Unnamed")}</span>`;
+    if (list === "income") return `${name}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
+    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
+    if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
+    return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
+  }
 
   // ---------- row meta (live-updated) ----------
   function meta(list, it, t) {
@@ -521,8 +567,12 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
   const COLORS = { income: "var(--good)", budgets: null, expenses: null, debts: "var(--c-debt)" };
   function row(list, it, fields, t) {
     const c = COLORS[list] || (it.kind === "want" ? "var(--c-want)" : "var(--c-need)");
-    return `<div class="row" data-list="${list}" data-id="${it.id}" style="--rowc:${c}">${fields}
-      <div class="meta"><div class="meta-l">${meta(list, it, t)}</div>${removeBtn(list, it)}</div></div>`;
+    const open = openRows.has(it.id);
+    let slim = "";
+    if (!open && list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); slim = `<div class="meter rowmeter${sp > lim ? " over" : ""}"><span style="width:${lim > 0 ? Math.min(sp / lim, 1) * 100 : (sp ? 100 : 0)}%"></span></div>`; }
+    return `<div class="row${open ? " open" : ""}" data-list="${list}" data-id="${it.id}" style="--rowc:${c}">
+      <button type="button" class="rowhead" data-toggle="${it.id}" aria-expanded="${open}"><span class="rh">${head(list, it, t)}</span><span class="chev" aria-hidden="true">▼</span></button>
+      ${open ? `${fields}<div class="meta"><div class="meta-l">${meta(list, it, t)}</div>${removeBtn(list, it)}</div>` : slim}</div>`;
   }
 
   // ---------- panels ----------
@@ -550,14 +600,14 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
       <div class="list">${cats.length ? cats.map(c => row("budgets", c, `<div class="fields">${textField("budgets", c, "Category", "e.g. Groceries")}${moneyField("budgets", c, "amount", "Monthly limit")}</div>
         <div class="fields even">${selectField("budgets", c, "kind", "Type", KIND)}</div>`, t)).join("") : '<div class="empty">No categories yet.</div>'}</div>
       <div><button type="button" class="btn" data-add="budgets">Add category</button></div>
-      <div class="note">Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.</div>
+      <div class="note">Tap a category to edit or delete it. Your daily amount is your category limits${unassigned > 0 ? ` plus ${moneyR(unassigned)} you haven't assigned` : ""}, minus what you've spent this month, spread over the days left.</div>
 
       <div class="group-title"><h3>This month's purchases</h3><span class="sub num">${money(t.spentMonth)}</span></div>
       <div class="log">${recent.length ? recent.map(e => `<div class="log-item num">
           <span class="d">${fmtD(e.date)}</span>
           <span class="w">${esc(e.note || catName(e.cat))} <small>· ${esc(catName(e.cat))} · ${e.method === "card" ? "Card" : e.method === "cash" ? "Cash" : "Debit"}</small></span>
           <b>${money(n(e.amount))}</b>
-          <button type="button" class="btn link" data-dellog="${e.id}" aria-label="Remove purchase">Remove</button></div>`).join("") : '<div class="empty">Nothing logged this month yet.</div>'}</div>`;
+          <button type="button" class="btn del" data-dellog="${e.id}" aria-label="Delete purchase">Delete</button></div>`).join("") : '<div class="empty">Nothing logged this month yet.</div>'}</div>`;
   }
 
   function chipsHTML(t) {
@@ -580,7 +630,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
       <div class="list">${manual.length ? manual.map(exRow).join("") : '<div class="empty">Nothing here.</div>'}</div>
       <div class="field"><span>Tap to add a common one</span><div class="pick">${PRESETS.map((p, i) => `<button type="button" class="opt" data-preset="${i}">${p[0]}</button>`).join("")}</div></div>
       <div><button type="button" class="btn" data-add="expenses">Add something else</button></div>
-      <div class="note">Mark anything that's a choice as a want. Bills that come every few months are spread across each month so you set money aside. Debt payments are on the Debt tab.</div>`;
+      <div class="note">Tap an item to edit or delete it. Mark anything that's a choice as a want. Bills that come every few months are spread across each month so you set money aside. Debt payments are on the Debt tab.</div>`;
   }
 
   function panelIncome(t) {
@@ -682,7 +732,9 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const t = compute();
     document.querySelectorAll(".row[data-list]").forEach(r => {
       const it = (state[r.dataset.list] || []).find(x => x.id === r.dataset.id);
-      if (it) r.querySelector(".meta-l").innerHTML = meta(r.dataset.list, it, t);
+      if (!it) return;
+      const m = r.querySelector(".meta-l"); if (m) m.innerHTML = meta(r.dataset.list, it, t);
+      r.querySelector(".rh").innerHTML = head(r.dataset.list, it, t);
     });
     if ($("cardOut")) $("cardOut").innerHTML = cardHTML(t);
     if ($("calcOut")) $("calcOut").innerHTML = calcHTML(t);
@@ -703,7 +755,8 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const f = inp.closest(".field"), r = inp.closest(".row"), nm = r && r.querySelector('[data-k="name"]');
     $("kpLabel").textContent = (nm && nm.value ? nm.value + " · " : "") + (f ? f.querySelector("span").textContent : "Amount");
     $("kp").hidden = false; document.body.classList.add("kp-open"); kpShow();
-    try { inp.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (_) {}
+    const box = inp.closest(".row, .quick") || inp; // keep the whole item, with its Delete button, above the keypad
+    requestAnimationFrame(() => { try { box.scrollIntoView({ block: "start", behavior: "smooth" }); } catch (_) {} });
   }
   function kpClose() {
     if (!kpInput) return;
@@ -745,6 +798,8 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const num = e.target.closest("input[data-num]");
     if (num) { kpOpen(num); return; }
     if (kpInput && !e.target.closest("#kp")) kpClose();
+    const tog = e.target.closest("[data-toggle]");
+    if (tog) { const id = tog.dataset.toggle; if (openRows.has(id)) openRows.delete(id); else openRows.add(id); renderPanel(); return; }
     const opt = e.target.closest("[data-q]");
     if (opt) {
       q[opt.dataset.q] = opt.dataset.v;
@@ -754,7 +809,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const pre = e.target.closest("[data-preset]");
     if (pre) {
       const p = PRESETS[+pre.dataset.preset], id = uid();
-      state.expenses.push({ id, name: p[0], amount: "", freq: "monthly", kind: p[1], auto: p[2], pay: p[3], due: "" });
+      state.expenses.push({ id, name: p[0], amount: "", freq: "monthly", kind: p[1], auto: p[2], pay: p[3], due: "" }); openRows.add(id);
       changed(); renderPanel(); renderSummary();
       kpOpen(document.getElementById("expenses-amount-" + id));
       return;
@@ -776,7 +831,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
         budgets: { id, name: "", amount: "", kind: "want" },
         debts: { id, name: "", balance: "", apr: "", payment: "", auto: true },
       }[l];
-      state[l].push(fresh); changed(); renderPanel(); renderSummary();
+      state[l].push(fresh); openRows.add(id); changed(); renderPanel(); renderSummary();
       const inp = document.getElementById(`${l}-name-${id}`); if (inp) inp.focus();
       return;
     }
