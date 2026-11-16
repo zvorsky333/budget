@@ -207,6 +207,8 @@ input[type=date] { -webkit-appearance: none; appearance: none; display: block; m
 input[type=date]::-webkit-date-and-time-value { text-align: left; margin: 0; }
 .field, .field > div, .fields, .quick { min-width: 0; max-width: 100%; }
 .btn { min-height: 38px; padding: 7px 12px; font-size: 13px; }
+textarea { width: 100%; min-height: 90px; font: 12px ui-monospace, Menlo, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn.del { color: var(--bad); border-color: var(--bad); background: transparent; min-height: 34px; padding: 4px 12px; }
 .opt { min-height: 34px; padding: 5px 11px; font-size: 13px; }
 .quick { padding: 10px; gap: 8px; scroll-margin-top: 10px; }
@@ -647,7 +649,15 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="list">${state.income.map(i => row("income", i, `<div class="fields">${textField("income", i, "Source", "e.g. Paycheck")}${moneyField("income", i, "amount", "Amount")}</div>
       <div class="fields even">${selectField("income", i, "freq", "How often", freqOpts(["weekly", "biweekly", "monthly", "yearly"]))}</div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
       <div><button type="button" class="btn primary" data-add="income">Add income</button></div>
-      <div class="note">Use take-home pay, after taxes and anything your employer deducts. Weekly pay becomes a monthly figure as pay × 52 ÷ 12, since some months have five paydays.</div>`;
+      <div class="note">Use take-home pay, after taxes and anything your employer deducts. Weekly pay becomes a monthly figure as pay × 52 ÷ 12, since some months have five paydays.</div>
+      <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Backup</h3></div>
+      <div class="note">Your budget is stored only in this app on this device. Copy a backup now and then and keep it in Notes, so you can restore it if the data is ever cleared or you move to a new phone.</div>
+      <div class="btnrow"><button type="button" class="btn" id="bkCopy">Copy backup</button><button type="button" class="btn" id="bkShow">Restore from a backup</button></div>
+      <div id="bkBox" class="list" hidden>
+        <textarea id="bkText" aria-label="Backup text" placeholder="Paste your backup here"></textarea>
+        <div class="btnrow"><button type="button" class="btn del" id="bkRestore">Replace my budget with this backup</button></div>
+      </div>
+      <div class="note" id="bkMsg" aria-live="polite"></div>`;
   }
 
   function cardHTML(t) {
@@ -838,6 +848,21 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const inp = document.getElementById(`${l}-name-${id}`); if (inp) inp.focus();
       return;
     }
+    if (e.target.id === "bkCopy") {
+      const text = JSON.stringify(state);
+      const manual = () => { $("bkBox").hidden = false; $("bkText").value = text; $("bkText").select(); $("bkMsg").textContent = "Couldn't copy automatically. Select all the text in the box and copy it."; };
+      try { navigator.clipboard.writeText(text).then(() => { $("bkMsg").textContent = "Backup copied. Paste it into Notes to keep it."; }, manual); } catch (_) { manual(); }
+      return;
+    }
+    if (e.target.id === "bkShow") { $("bkBox").hidden = false; $("bkText").value = ""; $("bkText").focus(); $("bkMsg").textContent = "Paste your backup into the box, then tap Replace."; return; }
+    if (e.target.id === "bkRestore") {
+      let s = null;
+      try { s = migrate(JSON.parse($("bkText").value.trim())); } catch (_) {}
+      if (!s) { $("bkMsg").textContent = "That doesn't look like a backup from this app. Paste the whole text and try again."; return; }
+      state = s; state.isExample = false; openRows.clear(); save(); redraw();
+      $("bkMsg").textContent = "Backup restored.";
+      return;
+    }
     if (e.target.id === "clearExamples") {
       const base = EXAMPLE();
       state = { v: 2, isExample: false, savingsPct: 10, savingsAuto: false, balance: "", balanceSpend: true,
@@ -897,7 +922,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   }
   const redraw = () => { renderTabs(); renderPanel(); renderSummary(); };
 
-  try { const raw = localStorage.getItem(LS_KEY); if (raw) { const s = migrate(JSON.parse(raw)); if (s) state = s; } } catch (_) {}
+  try { const raw = localStorage.getItem(LS_KEY); if (raw) { const s = migrate(JSON.parse(raw)); if (s) state = s; else localStorage.setItem(LS_KEY + "-unreadable", raw); } } catch (_) {}
   redraw();
   setStatus(state.isExample ? "Example budget" : "Saved on this device");
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {}
@@ -905,7 +930,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   // Save right away when the app is closed; refresh the daily numbers when it's reopened.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") { if (saveTimer) save(); }
-    else { renderSummary(); if (!kpInput && !document.activeElement.matches("input, select")) renderPanel(); }
+    else { renderSummary(); if (!kpInput && !document.activeElement.matches("input, select, textarea") && !($("bkBox") && !$("bkBox").hidden)) renderPanel(); }
   });
   window.addEventListener("pagehide", () => { if (saveTimer) save(); });
 })();
