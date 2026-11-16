@@ -496,10 +496,10 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const cRaw = +state.card.balanceAt, cFresh = state.card.balance !== "" && cRaw && ymd(new Date(cRaw)).slice(0, 7) === monthS;
       const cardAt = cFresh ? cRaw : bankAt, cDay = new Date(cardAt).getDate(), cY = ymd(new Date(cardAt));
       const since = (e, at, y) => e.date > y || (e.date === y && e.at && e.at > at);
-      let incomeLeft = 0, guessed = false; const paydays = [];
+      let incomeLeft = 0, incomeIn = 0, guessed = false; const paydays = [];
       for (const i of state.income) {
         const ds = paydaysBetween(i, sY, endY);
-        if (ds) { incomeLeft += ds.length * n(i.amount); paydays.push(...ds); }
+        if (ds) { incomeLeft += ds.length * n(i.amount); paydays.push(...ds); incomeIn += ds.filter(y => y <= todayS).length * n(i.amount); }
         else if (n(i.amount) > 0) { incomeLeft += monthly(i) * (dim - sDay) / dim; guessed = true; }
       }
       paydays.sort();
@@ -515,10 +515,15 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const cushion = n(state.cushion);
       const beforeCard = n(state.balance) + incomeLeft - bankBills - debtLeft - savingsLeft - bankSince;
       const avail = beforeCard - cardOwed - cushion;
+      // What the bank itself should show today: autopay and paydays whose date has passed are assumed to have happened.
+      const dayN = today.getDate();
+      const gone = (e, amt, auto) => { const d = Math.min(parseInt(e.due, 10) || 0, dim); return auto && e.paid !== monthS && (!e.freq || e.freq === "monthly") && d >= sDay && d <= dayN ? amt : 0; };
+      const autoOut = sum(exp.filter(e => e.pay !== "card"), e => gone(e, n(e.amount), e.auto)) + sum(state.debts, d => gone({ due: d.due, paid: d.paid }, n(d.payment), d.auto));
+      const expectedBank = n(state.balance) - bankSince - autoOut + incomeIn - (state.savingsAuto ? incomeIn * n(state.savingsPct) / 100 : 0);
       const dayAllow = Math.max(avail + todaySince, 0) / daysLeft;
       const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
       exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
-        bankSince, cardSince, todaySince, cardOwed, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+        bankSince, cardSince, todaySince, expectedBank, cardOwed, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
     }
     const stale = !exact && state.balance !== "" && !!bankAt;
 
@@ -634,7 +639,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       ${line(`${esc(state.card.name || "Credit card")} to pay off in full`, x.cardOwed, "−")}
       ${line("Cushion to keep in the bank", x.cushion, "−")}
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
-    </div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>${syncLine()}`;
+    </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>${syncLine()}`;
   }
   let exactOpen = true;
   document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
@@ -661,18 +666,37 @@ body.kp-open .wrap { padding-bottom: 360px; }
   const removeBtn = (list, it) => `<button type="button" class="btn del" data-del="${it.id}" data-list="${list}" aria-label="Delete ${esc(it.name) || "item"}">Delete</button>`;
   const openRows = new Set();
   // In exact mode, says whether a bill or loan payment is still counted against this month's money.
-  function stillPill(it, t, asDebt) {
-    const x = t.exact; if (!x) return "";
+  // Where a bill or loan payment stands this month, relative to the last re-sync and today.
+  //   in     = already included in the balances entered at re-sync
+  //   auto   = set aside, and its autopay date has now passed (it has left the account since)
+  //   late   = set aside, paid by hand, and its due date has passed
+  //   coming = set aside, date not reached yet (or no date)
+  function billStatus(it, t, asDebt) {
+    const x = t.exact; if (!x) return null;
     const e = asDebt ? { amount: it.payment, due: it.due, paid: it.paid, unpaid: it.unpaid } : it;
-    const left = dueLeft(e, !asDebt && it.pay === "card" ? x.cDay : x.sDay, t.monthS, t.dim);
-    return left > 0 ? '<span class="pill no">Still to come</span>' : '<span class="pill ok">Paid</span>';
+    if (dueLeft(e, !asDebt && it.pay === "card" ? x.cDay : x.sDay, t.monthS, t.dim) <= 0) return { code: "in" };
+    const d = (!e.freq || e.freq === "monthly") ? Math.min(parseInt(e.due, 10) || 0, t.dim) : 0, day = t.today.getDate();
+    if (d && it.auto && d <= day) return { code: "auto", d };
+    if (d && !it.auto && d < day) return { code: "late", d };
+    return { code: "coming", d };
+  }
+  function stillPill(it, t, asDebt) {
+    const b = billStatus(it, t, asDebt); if (!b) return "";
+    if (b.code === "in") return '<span class="pill ok">Paid</span>';
+    if (b.code === "auto") return `<span class="pill ok">Auto-paid on the ${ordinal(b.d)}</span>`;
+    if (b.code === "late") return `<span class="pill no">Was due on the ${ordinal(b.d)}</span>`;
+    return `<span class="pill need">Set aside${b.d ? ", due " + ordinal(b.d) : ""}</span>`;
+  }
+  function headPill(it, t, asDebt) {
+    const b = billStatus(it, t, asDebt); if (!b) return "";
+    return b.code === "coming" ? '<span class="pill need">Due</span>' : b.code === "late" ? '<span class="pill no">Past due?</span>' : "";
   }
   const paidBox = (list, it, t) => `<label class="check"><input type="checkbox" data-k="paid" id="${list}-paid-${it.id}"${it.paid === t.monthS ? " checked" : ""}> Already paid this month</label>`;
   const catSpent = (it, t) => t.monthLog.filter(e => e.cat === it.id).reduce((a, e) => a + n(e.amount), 0);
   function head(list, it, t) {
     const name = `<span class="rh-n">${esc(it.name || "Unnamed")}</span>`;
     if (list === "income") return `${name}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
-    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${t.exact && dueLeft(it, it.pay === "card" ? t.exact.cDay : t.exact.sDay, t.monthS, t.dim) > 0 ? '<span class="pill no">Due</span>' : ""}<span class="rh-v num">${it.varies ? "about " : ""}${money(monthly(it))}/mo</span>`;
+    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${headPill(it, t)}<span class="rh-v num">${it.varies ? "about " : ""}${money(monthly(it))}/mo</span>`;
     if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
     return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
   }
@@ -882,7 +906,13 @@ body.kp-open .wrap { padding-bottom: 360px; }
   // ================= re-sync: the one place balances are set =================
   function openSync() {
     const t = compute(), day = t.today.getDate();
-    const pre = e => e.paid === t.monthS ? true : e.unpaid === t.monthS ? false : ((!e.freq || e.freq === "monthly") && parseInt(e.due, 10) > 0 && parseInt(e.due, 10) < day);
+    const pre = e => { // autopay whose date has arrived starts ticked; so does anything ticked before
+      const d = (!e.freq || e.freq === "monthly") ? parseInt(e.due, 10) || 0 : 0;
+      if (e.paid === t.monthS) return true;
+      if (d && e.auto && d <= day) return true;
+      if (e.unpaid === t.monthS) return false;
+      return d > 0 && d < day;
+    };
     const item = (list, e, amt, tag) => `<label class="sy-item"><input type="checkbox" data-sy-paid="${list}:${e.id}" id="sy-${list}-${e.id}"${pre(e) ? " checked" : ""}><span class="n">${esc(e.name || "Unnamed")}</span>${tag}${e.varies
       ? `<span class="prefix dollar sy-amt" data-p="$"><input type="number" data-sy-amt="${e.id}" id="sy-amt-${e.id}" aria-label="${esc(e.name || "Bill")} amount this month" value="${esc(e.amount)}"></span>`
       : `<span class="v num">${money(amt)}${e.due ? " · " + ordinal(e.due) : ""}</span>`}</label>`;
