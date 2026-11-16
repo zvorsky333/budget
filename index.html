@@ -217,6 +217,8 @@ body.sync-open { overflow: hidden; }
 .sy-item input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 .sy-item .n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sy-item .v { margin-left: auto; white-space: nowrap; color: var(--muted); }
+.sy-amt { width: 108px; flex: none; margin-left: auto; }
+.sy-amt input[type=text] { min-height: 34px; padding-top: 4px; padding-bottom: 4px; }
 .sy-foot { position: sticky; bottom: 0; background: var(--bg); padding: 8px 0 4px; display: flex; gap: 8px; }
 .sy-foot .btn { flex: 1; min-height: 46px; font-size: 15px; }
 .syncline { display: flex; align-items: center; gap: 10px; font-size: 13px; }
@@ -368,7 +370,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     income: [{ id: uid(), name: "Paycheck (take-home)", amount: 900, freq: "weekly", next: nextFriday() }],
     expenses: [
       { id: uid(), name: "Rent", amount: 1400, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 1 },
-      { id: uid(), name: "Electric", amount: 90, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 15 },
+      { id: uid(), name: "Electric", amount: 90, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 15, varies: true },
       { id: uid(), name: "Car insurance", amount: 720, freq: "semi", kind: "need", auto: true, pay: "bank", due: "" },
       { id: uid(), name: "Internet", amount: 65, freq: "monthly", kind: "need", auto: true, pay: "card", due: 20 },
       { id: uid(), name: "Phone", amount: 55, freq: "monthly", kind: "need", auto: false, pay: "card", due: 22 },
@@ -670,7 +672,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
   function head(list, it, t) {
     const name = `<span class="rh-n">${esc(it.name || "Unnamed")}</span>`;
     if (list === "income") return `${name}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
-    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${t.exact && dueLeft(it, it.pay === "card" ? t.exact.cDay : t.exact.sDay, t.monthS, t.dim) > 0 ? '<span class="pill no">Due</span>' : ""}<span class="rh-v num">${money(monthly(it))}/mo</span>`;
+    if (list === "expenses") return `${name}${it.auto ? '<span class="pill auto">Auto</span>' : ""}${it.pay === "card" ? '<span class="pill need">Card</span>' : ""}${t.exact && dueLeft(it, it.pay === "card" ? t.exact.cDay : t.exact.sDay, t.monthS, t.dim) > 0 ? '<span class="pill no">Due</span>' : ""}<span class="rh-v num">${it.varies ? "about " : ""}${money(monthly(it))}/mo</span>`;
     if (list === "budgets") { const sp = catSpent(it, t), lim = n(it.amount); return `${name}<span class="rh-v num${sp > lim ? " bad" : ""}">${money(sp)} <span class="sub">of ${moneyR(lim)}</span></span>`; }
     return `${name}<span class="rh-v num">${moneyR(n(it.balance))} <span class="sub">${money(n(it.payment))}/mo</span></span>`;
   }
@@ -757,7 +759,8 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <div class="fields even">${selectField("expenses", e, "freq", "How often", freqOpts(["monthly", "weekly", "biweekly", "quarterly", "semi", "yearly"]))}
       <label class="field"><span>Due day</span><input type="number" inputmode="numeric" min="1" max="31" data-k="due" id="expenses-due-${e.id}" value="${esc(e.due)}" placeholder="1–31"></label></div>
       <div class="fields even">${selectField("expenses", e, "kind", "Type", KIND)}${selectField("expenses", e, "pay", "Paid from", [["bank", "Bank account"], ["card", state.card.name || "Credit card"]])}</div>
-      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>`, t);
+      <label class="check"><input type="checkbox" data-k="auto" id="expenses-auto-${e.id}"${e.auto ? " checked" : ""}> Comes out automatically</label>
+      <label class="check"><input type="checkbox" data-k="varies" id="expenses-varies-${e.id}"${e.varies ? " checked" : ""}> Amount changes each month (this is an estimate)</label>`, t);
     const auto = state.expenses.filter(e => e.auto), manual = state.expenses.filter(e => !e.auto);
     const sumM = a => moneyR(a.reduce((s, e) => s + monthly(e), 0));
     return `<div class="chips" id="chips">${chipsHTML(t)}</div>
@@ -880,7 +883,9 @@ body.kp-open .wrap { padding-bottom: 360px; }
   function openSync() {
     const t = compute(), day = t.today.getDate();
     const pre = e => e.paid === t.monthS ? true : e.unpaid === t.monthS ? false : ((!e.freq || e.freq === "monthly") && parseInt(e.due, 10) > 0 && parseInt(e.due, 10) < day);
-    const item = (list, e, amt, tag) => `<label class="sy-item"><input type="checkbox" data-sy-paid="${list}:${e.id}" id="sy-${list}-${e.id}"${pre(e) ? " checked" : ""}><span class="n">${esc(e.name || "Unnamed")}</span>${tag}<span class="v num">${money(amt)}${e.due ? " · " + ordinal(e.due) : ""}</span></label>`;
+    const item = (list, e, amt, tag) => `<label class="sy-item"><input type="checkbox" data-sy-paid="${list}:${e.id}" id="sy-${list}-${e.id}"${pre(e) ? " checked" : ""}><span class="n">${esc(e.name || "Unnamed")}</span>${tag}${e.varies
+      ? `<span class="prefix dollar sy-amt" data-p="$"><input type="number" data-sy-amt="${e.id}" id="sy-amt-${e.id}" aria-label="${esc(e.name || "Bill")} amount this month" value="${esc(e.amount)}"></span>`
+      : `<span class="v num">${money(amt)}${e.due ? " · " + ordinal(e.due) : ""}</span>`}</label>`;
     const bank = state.expenses.filter(e => e.pay !== "card"), card = state.expenses.filter(e => e.pay === "card");
     const items = [...bank.map(e => item("expenses", e, n(e.amount), "")), ...state.debts.map(d => item("debts", d, n(d.payment), "")), ...card.map(e => item("expenses", e, n(e.amount), '<span class="pill need">Card</span>'))];
     $("syncBody").innerHTML = `
@@ -895,7 +900,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       ${state.income.length ? `<div class="quick"><h3>Next payday</h3>${state.income.map(i => `<label class="field"><span>${esc(i.name || "Income")} · ${money(n(i.amount))}</span><input type="date" data-sy-next="${i.id}" id="sy-next-${i.id}" value="${esc(i.next || "")}"></label>`).join("")}
         <div class="note">A paycheck already in your bank balance shouldn't be counted again, so pick the next one you haven't received.</div></div>` : ""}
       ${items.length ? `<div class="list"><h3>Tick what has already come out this month</h3>
-        <div class="note">Ticked items are treated as already included in the balances above. Unticked ones are still to come and get set aside.</div>${items.join("")}</div>` : ""}
+        <div class="note">Ticked items are treated as already included in the balances above. Unticked ones are still to come and get set aside.${state.expenses.some(e => e.varies) ? " For bills that change, tap the amount to put in this month's figure once you know it. Until then the last amount is used as the estimate." : ""}</div>${items.join("")}</div>` : ""}
       <div class="quick"><label class="field"><span>Cushion to always keep in the bank (optional)</span><div class="prefix dollar" data-p="$"><input type="number" id="syCushion" value="${esc(state.cushion)}" placeholder="0"></div></label></div>
       <div class="warn" id="syMsg" hidden></div>
       <div class="sy-foot"><button type="button" class="btn" id="syCancel">Cancel</button><button type="button" class="btn primary" id="sySave">Save and re-sync</button></div>`;
@@ -915,6 +920,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const [list, id] = c.dataset.syPaid.split(":"), it = state[list].find(x => x.id === id);
       if (it) { it.paid = c.checked ? month : ""; it.unpaid = c.checked ? "" : month; }
     });
+    document.querySelectorAll("#sync [data-sy-amt]").forEach(i => { const e = state.expenses.find(x => x.id === i.dataset.syAmt); if (e && i.value.trim() !== "") e.amount = i.value.trim(); });
     closeSync(); changed(); renderTabs(); renderPanel(); renderSummary();
   }
 
@@ -941,7 +947,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
 
   // ================= keypad =================
   const q = { cat: null, method: "card" };
-  const PRESETS = [["Rent", "need", true, "bank"], ["Electric", "need", true, "bank"], ["Water", "need", false, "bank"], ["Internet", "need", true, "card"], ["Phone", "need", true, "card"],
+  const PRESETS = [["Rent", "need", true, "bank"], ["Electric", "need", true, "bank", true], ["Water", "need", false, "bank", true], ["Internet", "need", true, "card"], ["Phone", "need", true, "card"],
     ["Car insurance", "need", true, "bank"], ["Streaming", "want", true, "card"], ["Music", "want", true, "card"], ["Gym", "want", true, "card"], ["Cloud storage", "want", true, "card"]];
   let kpInput = null, kpStr = "", kpFresh = true;
   function kpShow() { $("kpVal").textContent = (kpInput.closest(".dollar") ? "$" : "") + (kpStr || "0") + (kpInput.closest(".pct") ? "%" : ""); }
@@ -1010,7 +1016,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const pre = e.target.closest("[data-preset]");
     if (pre) {
       const p = PRESETS[+pre.dataset.preset], id = uid();
-      state.expenses.push({ id, name: p[0], amount: "", freq: "monthly", kind: p[1], auto: p[2], pay: p[3], due: "" }); openRows.add(id);
+      state.expenses.push({ id, name: p[0], amount: "", freq: "monthly", kind: p[1], auto: p[2], pay: p[3], due: "", varies: !!p[4] }); openRows.add(id);
       changed(); renderPanel(); renderSummary();
       kpOpen(document.getElementById("expenses-amount-" + id));
       return;
