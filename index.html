@@ -541,7 +541,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const dayAllow = Math.max(avail + todayCount, 0) / daysLeft;
       const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
       exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
-        bankSince, cardSince, todaySince: todayCount, spentCount, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+        incomeIn, bankSince, cardSince, todaySince: todayCount, spentCount, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
     }
     const stale = !exact && state.balance !== "" && !!bankAt;
 
@@ -666,6 +666,16 @@ body.kp-open .wrap { padding-bottom: 360px; }
     return `<div class="syncline num"><span>${has ? `Bank <b>${money(n(state.balance))}</b>${state.card.balance !== "" ? ` · Card <b>${money(n(state.card.balance))}</b>` : ""} <span class="sub">as of ${when}</span>` : "Balances not entered yet"}</span>
       <button type="button" class="btn primary" data-sync>${has ? "Re-sync" : "Enter balances"}</button></div>`;
   }
+  function reconHTML() {
+    const r = state.lastRecon; if (!r) return "";
+    const bits = [];
+    if (r.bankGap >= 1) bits.push(`${money(r.bankGap)} had left your bank without being logged`);
+    if (r.cardGap >= 1) bits.push(`${money(r.cardGap)} of card charges hadn't been logged`);
+    if (r.cardPaid >= 1) bits.push(`a card payment of ${money(r.cardPaid)} was picked up`);
+    if (r.bankGap <= -1) bits.push(`your bank had ${money(-r.bankGap)} more than expected (extra pay or a refund)`);
+    const fixed = r.bankGap >= 1 || r.cardGap >= 1;
+    return `<div class="note">Last re-sync: ${bits.length ? bits.join("; ") + "." : "everything matched what was logged."}${fixed ? " The missing amount was added to this month as Untracked spending." : ""}</div>`;
+  }
   function exactHTML(t) {
     const x = t.exact;
     if (!x) return `<div class="autoline"><span>${t.stale ? "Your bank balance is from last month. Enter today's balance" : "This is an estimate from your monthly plan. Enter what's in your bank right now"} for an exact number.</span></div>${syncLine()}`;
@@ -692,7 +702,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
         ${line(`${esc(state.card.name || "Credit card")} charges from this month`, x.nextCard, "−")}
         <div class="tot"><span>To spend in ${x.nmName}</span><span class="${x.nextStart + Math.max(x.avail, 0) < 0 ? "bad" : ""}">${signed(Math.round(x.nextStart + Math.max(x.avail, 0)))}</span></div>
       </div><div class="note">This assumes you carry over everything that's left this month. Each dollar you spend before ${shortDate(x.endY)} lowers it by a dollar${x.stmtOnly ? ", whether it's debit, cash or card" : ""}.${x.cushion ? ` It includes your ${money(x.cushion)} cushion.` : ""}</div></details>
-      ${syncLine()}`;
+      ${syncLine()}${reconHTML()}`;
   }
   let exactOpen = true;
   document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
@@ -1010,7 +1020,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const items = [...bank.map(e => item("expenses", e, n(e.amount), "")), ...state.debts.map(d => item("debts", d, n(d.payment), "")), ...card.map(e => item("expenses", e, n(e.amount), '<span class="pill need">Card</span>'))];
     $("syncBody").innerHTML = `
       <h1>Re-sync</h1>
-      <div class="sub">Open your banking app and enter what it shows right now. Everything is recalculated from these numbers.</div>
+      <div class="sub">Open your banking app and enter what it shows right now. These numbers override everything else: if they don't match what you logged, the gap is recorded as untracked spending and all figures are recalculated from here.</div>
       <div class="quick">
         <div class="fields even">
           <label class="field"><span>In your bank now</span><div class="prefix dollar" data-p="$"><input type="number" id="syBank" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
@@ -1037,6 +1047,28 @@ body.kp-open .wrap { padding-bottom: 360px; }
     const bank = $("syBank").value.trim();
     if (bank === "") { $("syMsg").hidden = false; $("syMsg").textContent = "Enter what's in your bank right now."; $("sync").scrollTop = 0; return; }
     const now = Date.now(), month = ymd(new Date()).slice(0, 7);
+    // Set the record straight: compare what the app expected with what the accounts really show,
+    // and record any gap as untracked spending so this month's totals and history stay true.
+    const t0 = compute(), x0 = t0.exact; let recon = null;
+    if (x0) {
+      const ticked = (list, id) => { const c = document.getElementById(`sy-${list}-${id}`); return !!(c && c.checked); };
+      const amt = e => { const i = document.getElementById("sy-amt-" + e.id); return i && i.value.trim() !== "" ? n(i.value) : n(e.amount); };
+      const counted = (e, day) => dueLeft(e, day, t0.monthS, t0.dim) > 0;
+      let bankExp = x0.bank - x0.bankSince + x0.incomeIn - (state.savingsAuto ? x0.incomeIn * n(state.savingsPct) / 100 : 0);
+      let cardExp = x0.cardNow + x0.cardSince;
+      state.expenses.forEach(e => { const card = e.pay === "card"; if (counted(e, card ? x0.cDay : x0.sDay) && ticked("expenses", e.id)) { if (card) cardExp += amt(e); else bankExp -= amt(e); } });
+      state.debts.forEach(d => { if (counted({ amount: d.payment, due: d.due, paid: d.paid, unpaid: d.unpaid }, x0.sDay) && ticked("debts", d.id)) bankExp -= n(d.payment); });
+      const cardNew = n($("syCard").value);
+      const cardPaid = Math.max(0, cardExp - cardNew);            // card lower than expected: a payment made from the bank
+      const bankGap = Math.round((bankExp - cardPaid - n(bank)) * 100) / 100; // > 0: money left the bank that wasn't logged
+      const cardGap = Math.round((cardNew - cardExp) * 100) / 100;            // > 0: card charges that weren't logged
+      const today = ymd(new Date());
+      const add = (amount, method) => state.log.push({ id: uid(), at: now - 1, date: today, amount, note: "Untracked spending (found at re-sync)", cat: "", catName: "Untracked", method, adj: true });
+      if (bankGap >= 1) add(bankGap, "bank");
+      if (cardGap >= 1) add(cardGap, "card");
+      recon = { at: now, bankGap, cardGap, cardPaid: Math.round(cardPaid * 100) / 100 };
+    }
+    state.lastRecon = recon;
     state.balance = bank; state.balanceAt = now;
     state.card.balance = $("syCard").value.trim() === "" ? "0" : $("syCard").value.trim(); state.card.balanceAt = now;
     state.card.statement = $("syStmt").value.trim();
