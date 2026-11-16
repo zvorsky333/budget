@@ -522,6 +522,14 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const stmtOnly = stmtKnown && state.card.mode === "statement";
       const cardCount = stmtOnly ? cardDueNow : cardOwed;
       const avail = beforeCard - cardCount - cushion;
+      // Next month at a glance: a full month of pay against a full month of commitments.
+      const nm = new Date(today.getFullYear(), today.getMonth() + 1, 1), nmEnd = ymd(new Date(nm.getFullYear(), nm.getMonth() + 1, 0));
+      let incomeNext = 0;
+      for (const i of state.income) { const ds = paydaysBetween(i, endY, nmEnd); incomeNext += ds ? ds.length * n(i.amount) : monthly(i); }
+      const nextFixed = needFixed + wantFixed + debt, nextSave = incomeNext * n(state.savingsPct) / 100;
+      const nextCard = stmtOnly ? cardNext : 0;
+      const nextStart = incomeNext - nextFixed - nextSave - nextCard;
+      const nmName = nm.toLocaleDateString("en-US", { month: "long" });
       // What the bank itself should show today: autopay and paydays whose date has passed are assumed to have happened.
       const dayN = today.getDate();
       const gone = (e, amt, auto) => { const d = Math.min(parseInt(e.due, 10) || 0, dim); return auto && e.paid !== monthS && (!e.freq || e.freq === "monthly") && d >= sDay && d <= dayN ? amt : 0; };
@@ -530,7 +538,7 @@ body.kp-open .wrap { padding-bottom: 360px; }
       const dayAllow = Math.max(avail + todaySince, 0) / daysLeft;
       const daysWeek = Math.min(Math.round((parseYmd(weekEnd) - parseYmd(todayS)) / 864e5) + 1, daysLeft);
       exact = { bank: n(state.balance), bankAt, cardAt, cFresh, cardNow: cFresh ? n(state.card.balance) : 0, incomeLeft, paydays, guessed, bankBills, cardBills, debtLeft, savingsLeft,
-        bankSince, cardSince, todaySince, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
+        bankSince, cardSince, todaySince, expectedBank, cardOwed, stmtKnown, cardDueNow, cardNext, stmtOnly, cardCount, incomeNext, nextFixed, nextSave, nextCard, nextStart, nmName, cushion, beforeCard, avail, dayAllow, daysWeek, sDay, cDay, endY };
     }
     const stale = !exact && state.balance !== "" && !!bankAt;
 
@@ -649,7 +657,16 @@ body.kp-open .wrap { padding-bottom: 360px; }
         : line(`${esc(state.card.name || "Credit card")} to pay off in full${x.stmtKnown ? ` (${money(x.cardDueNow)} due by ${shortDate(x.endY)}, ${money(x.cardNext)} next month)` : ""}`, x.cardOwed, "−")}
       ${line("Cushion to keep in the bank", x.cushion, "−")}
       <div class="tot"><span>Left until ${shortDate(x.endY)}</span><span class="${x.avail < 0 ? "bad" : ""}">${signed(Math.round(x.avail * 100) / 100)}</span></div>
-    </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>${syncLine()}`;
+    </div><div class="note">Bills not yet paid are already taken off above. Counting autopay and paydays up to today, your bank should show about <b>${money(Math.round(x.expectedBank * 100) / 100)}</b> (before any card payment). If it doesn't, re-sync.</div>${x.cFresh ? "" : `<div class="note">Your card balance isn't entered, so only card purchases logged here are counted. Tap Re-sync to add it.</div>`}</details>
+      <details class="exact"><summary>${x.nmName}: about ${signed(Math.round(x.nextStart))} to spend</summary><div class="kv num">
+        ${line(`Pay coming in ${x.nmName}`, x.incomeNext, "")}
+        ${line("Bills and loan payments", x.nextFixed, "−")}
+        ${line("Savings", x.nextSave, "−")}
+        ${line(`${esc(state.card.name || "Credit card")} charges from this month`, x.nextCard, "−")}
+        <div class="tot"><span>Left for everyday spending</span><span class="${x.nextStart < 0 ? "bad" : ""}">${signed(Math.round(x.nextStart))}</span></div>
+      </div><div class="note">${x.stmtOnly ? "This month's card charges come out of next month because you're only paying what's due this month."
+        : "This month's card charges are already covered from this month's money, so they don't reduce next month."} Anything you don't spend this month is extra on top.</div></details>
+      ${syncLine()}`;
   }
   let exactOpen = true;
   document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("details.exact")) exactOpen = e.target.open; }, true);
