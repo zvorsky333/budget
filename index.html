@@ -207,6 +207,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     <div class="bar" id="bar" aria-hidden="true"></div>
     <div class="legend num" id="legend"></div>
     <div class="autoline num" id="autoLine"></div>
+    <div class="autoline num" id="balLine" hidden></div>
 
     <div class="save-row">
       <div class="top">
@@ -283,7 +284,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 
   // ================= state =================
   const EXAMPLE = () => ({
-    v: 2, isExample: true, savingsPct: 10, savingsAuto: true,
+    v: 2, isExample: true, savingsPct: 10, savingsAuto: true, balance: "", balanceSpend: true,
     income: [{ id: uid(), name: "Paycheck (take-home)", amount: 900, freq: "weekly" }],
     expenses: [
       { id: uid(), name: "Rent", amount: 1400, freq: "monthly", kind: "need", auto: true, pay: "bank", due: 1 },
@@ -320,12 +321,14 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
       for (const k of ["income", "expenses", "budgets", "debts", "log"]) if (!Array.isArray(s[k])) s[k] = [];
       s.card = Object.assign({ name: "Credit card", limit: "", dueDay: "", carried: 0 }, s.card || {});
       s.calc = Object.assign(base.calc, s.calc || {});
+      if (s.balance === undefined) s.balance = "";
+      if (s.balanceSpend === undefined) s.balanceSpend = true;
       return s;
     }
     if (Array.isArray(s.bills)) { // from the first version of this app
       const needish = /grocer|gas|transit|fuel|util|medic|pharm/i;
       return {
-        v: 2, isExample: !!s.isExample, savingsPct: n(s.savingsPct) || 10, savingsAuto: false,
+        v: 2, isExample: !!s.isExample, savingsPct: n(s.savingsPct) || 10, savingsAuto: false, balance: "", balanceSpend: true,
         income: s.income || [],
         expenses: [
           ...(s.bills || []).map(b => ({ ...b, kind: "need", auto: false, pay: "bank" })),
@@ -378,7 +381,11 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const spentWeek = sum(state.log.filter(e => e.date >= weekStart && e.date <= weekEnd), e => n(e.amount));
 
     // Money for everyday spending = category limits + anything not assigned.
-    const pool = flex + Math.max(left, 0);
+    // A starting bank balance adds to it unless it's being kept as a cushion.
+    const start = n(state.balance);
+    const spendStart = state.balanceSpend !== false ? start : 0;
+    const pool = flex + Math.max(left + spendStart, 0);
+    const projectedEnd = start + income - needFixed - wantFixed - debt - savings - Math.max(flex, spentMonth);
     const dayAllowance = Math.max(pool - spentBeforeToday, 0) / daysLeft;
     const weekPool = pool * SCALE.week;
 
@@ -389,13 +396,13 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     const cardTotal = cardFixed + cardSpent + carried;
     const bankFixed = sum(exp.filter(e => e.pay !== "card"), monthly);
     const bankSpent = spentMonth - cardSpent;
-    const capacity = income - bankFixed - debt - savings - bankSpent;
+    const capacity = start + income - bankFixed - debt - savings - bankSpent;
     const remainingPool = Math.max(pool - spentMonth, 0);
     const cardRoom = capacity - cardTotal;
     const projected = cardTotal + remainingPool; // if the rest of your everyday budget goes on the card
 
     return { today, todayS, monthS, dim, daysLeft, weekStart, weekEnd, income, needFixed, wantFixed, needFlex, wantFlex, flex, debt, savings, needs, wants, left, autoTotal,
-      monthLog, spentMonth, spentToday, spentWeek, pool, dayAllowance, weekPool, cardFixed, cardSpent, carried, cardTotal, bankFixed, bankSpent, capacity, cardRoom, projected };
+      start, projectedEnd, monthLog, spentMonth, spentToday, spentWeek, pool, dayAllowance, weekPool, cardFixed, cardSpent, carried, cardTotal, bankFixed, bankSpent, capacity, cardRoom, projected };
   }
 
   // ================= summary =================
@@ -448,6 +455,8 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     }).join("");
     $("autoLine").innerHTML = `<i></i><span>Goes out automatically</span><span class="v">${fmtS(t.autoTotal * s)} <span class="sub">${t.income > 0 ? Math.round(t.autoTotal / t.income * 100) + "% of pay" : ""}</span></span>`;
 
+    $("balLine").hidden = !t.start;
+    $("balLine").innerHTML = `<span>In the bank: started with <b>${money(t.start)}</b></span><span class="v${t.projectedEnd < 0 ? " bad" : ""}">${signed(Math.round(t.projectedEnd))} <span class="sub">at month end</span></span>`;
     $("savePct").value = state.savingsPct;
     $("saveAuto").checked = !!state.savingsAuto;
     $("savePctOut").textContent = state.savingsPct + "%";
@@ -575,7 +584,14 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
   }
 
   function panelIncome(t) {
-    return `<div class="list">${state.income.map(i => row("income", i, `<div class="fields">${textField("income", i, "Source", "e.g. Paycheck")}${moneyField("income", i, "amount", "Amount")}</div>
+    return `<div class="quick">
+        <h3>Starting balance</h3>
+        <label class="field"><span>In your bank at the start of this month</span><div class="prefix dollar" data-p="$"><input type="number" data-path="balance" id="bankBalance" value="${esc(state.balance)}" placeholder="Tap to enter"></div></label>
+        <label class="check"><input type="checkbox" data-path="balanceSpend" id="balanceSpend"${state.balanceSpend !== false ? " checked" : ""}> Count it as money I can spend this month</label>
+        <div class="note">Update this at the start of each month. Uncheck the box to keep it as a cushion: it still counts toward paying your card, but not toward your daily amount.</div>
+      </div>
+      <div class="group-title"><h3>Income</h3><span class="sub num">${moneyR(t.income)}/mo</span></div>
+      <div class="list">${state.income.map(i => row("income", i, `<div class="fields">${textField("income", i, "Source", "e.g. Paycheck")}${moneyField("income", i, "amount", "Amount")}</div>
       <div class="fields even">${selectField("income", i, "freq", "How often", freqOpts(["weekly", "biweekly", "monthly", "yearly"]))}</div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
       <div><button type="button" class="btn primary" data-add="income">Add income</button></div>
       <div class="note">Use take-home pay, after taxes and anything your employer deducts. Weekly pay becomes a monthly figure as pay × 52 ÷ 12, since some months have five paydays.</div>`;
@@ -610,7 +626,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
         <label class="field"><span>Unpaid from last month</span><div class="prefix dollar" data-p="$"><input type="number" inputmode="decimal" min="0" step="0.01" data-path="card.carried" id="cardCarried" value="${esc(c.carried)}"></div></label>
       </div>
       <div id="cardOut" class="card" style="padding:0;border:0">${cardHTML(t)}</div>
-      <div class="note">Bills set to "Paid from: ${esc(c.name || "Credit card")}" and purchases logged with the card count here. Money left to pay it is your income minus everything paid from your bank, debt payments and savings.</div>`;
+      <div class="note">Bills set to "Paid from: ${esc(c.name || "Credit card")}" and purchases logged with the card count here. Money left to pay it is your starting balance plus income, minus everything paid from your bank, debt payments and savings.</div>`;
   }
 
   function calcHTML(t) {
@@ -766,7 +782,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
     }
     if (e.target.id === "clearExamples") {
       const base = EXAMPLE();
-      state = { v: 2, isExample: false, savingsPct: 10, savingsAuto: false,
+      state = { v: 2, isExample: false, savingsPct: 10, savingsAuto: false, balance: "", balanceSpend: true,
         income: [{ id: uid(), name: "Paycheck (take-home)", amount: "", freq: "weekly" }],
         expenses: [], budgets: base.budgets.map(b => ({ ...b, amount: "" })), debts: [],
         card: { name: "Credit card", limit: "", dueDay: "", carried: 0 }, log: [], calc: base.calc };
@@ -780,7 +796,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
       const it = state[r.dataset.list].find(x => x.id === r.dataset.id);
       if (it) { it[target.dataset.k] = value; return true; }
     }
-    if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); state[a][b] = value; return true; }
+    if (target.dataset.path) { const [a, b] = target.dataset.path.split("."); if (b === undefined) state[a] = value; else state[a][b] = value; return true; }
     return false;
   }
 
