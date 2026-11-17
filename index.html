@@ -958,14 +958,6 @@ body.kp-open .wrap { padding-bottom: 360px; }
       <label class="field"><span>Next payday</span><input type="date" data-k="next" id="income-next-${i.id}" value="${esc(i.next || "")}"></label></div>`, t)).join("") || '<div class="empty">No income yet.</div>'}</div>
       <div><button type="button" class="btn primary" data-add="income">Add income</button></div>
       <div class="note">Use take-home pay, after taxes and anything your employer deducts. Set the next payday so the app knows how many paychecks are still to come this month.</div>
-      <details class="exact" data-keep="calc"${keepOpen.calc ? " open" : ""}><summary>Can I afford a new monthly payment?</summary><div class="list" style="margin-top:8px">${(c => `
-      <div class="fields three">
-        <label class="field"><span>Loan amount</span><div class="prefix dollar" data-p="$"><input type="number" inputmode="decimal" min="0" data-path="calc.amount" id="calcAmt" value="${esc(c.amount)}"></div></label>
-        <label class="field"><span>Interest (APR)</span><div class="prefix pct" data-p="%"><input type="number" inputmode="decimal" min="0" step="0.01" data-path="calc.apr" id="calcApr" value="${esc(c.apr)}"></div></label>
-        <label class="field"><span>Term</span><div class="prefix mo" data-p="mo"><input type="number" inputmode="numeric" min="1" data-path="calc.months" id="calcMonths" value="${esc(c.months)}"></div></label>
-      </div>
-      <div id="calcOut" class="card" style="padding:0;border:0">${calcHTML(t)}</div>
-      <div class="note">This checks the payment against money you haven't already planned for, after your savings. A common rule of thumb is to keep debt payments other than rent or a mortgage under about 10–20% of take-home pay. It's a planning aid, not financial advice.</div>`)(state.calc)}</div></details>
       <div class="group-title" style="border-top:1px solid var(--line);padding-top:12px"><h3>Backup</h3></div>
       <div class="note">Your budget is stored only in this app on this device. Copy a backup now and then and keep it in Notes, so you can restore it if the data is ever cleared or you move to a new phone.</div>
       <div class="btnrow"><button type="button" class="btn" id="bkCopy">Copy backup</button><button type="button" class="btn" id="bkShow">Restore from a backup</button></div>
